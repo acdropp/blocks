@@ -23,6 +23,7 @@ Full product description: specs/product.md
 - Time block sizes: 15 min, 30 min, 1 hour, 2 hours only.
 - Fathom: no webhooks (no public URL). Fetch new meetings with action items using a created-after filter. Check the current Fathom API docs before writing this code.
 - Google account is a personal Gmail.
+- The Google OAuth client ID (iOS client type) is not a secret. It goes in the app's Info settings as GIDClientID, with the reversed client ID as a URL scheme. The downloaded client plist is stored outside the repo.
 
 ## How to work with Aaron
 - Aaron is new to Xcode and Swift and wants a step-by-step walkthrough.
