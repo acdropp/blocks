@@ -14,7 +14,7 @@ Full product description: specs/product.md
 - Never put secrets, API keys, or tokens in code or in the repo.
 - Do not change signing, team, bundle ID (com.acdropp.Blocks), or App Sandbox settings unless asked.
 - App Sandbox allows outgoing network connections only.
-- Sync runs on app launch and on Refresh (Command-R in the app). No background timers yet.
+- Sync runs on app launch, on Refresh (Command-R in the app), when the window becomes active, and every 5 minutes while the app is open. Never more than one sync runs at a time.
 - Keep the UI minimal: one window, three sections, no extra panels unless asked.
 
 ## Integration facts

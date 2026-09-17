@@ -1,8 +1,10 @@
 import SwiftUI
 import SwiftData
+import Combine
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Query private var items: [TodoItem]
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var tasksManager: GoogleTasksManager
@@ -10,6 +12,8 @@ struct ContentView: View {
     @State private var newTitle = ""
     @State private var isCompletedExpanded = false
     @State private var selection: PersistentIdentifier?
+
+    private let autoSyncTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,7 +59,15 @@ struct ContentView: View {
         .frame(minWidth: 320, minHeight: 400)
         .task {
             await authManager.restorePreviousSignIn()
-            await tasksManager.sync(context: modelContext)
+            await refresh()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await refresh() }
+            }
+        }
+        .onReceive(autoSyncTimer) { _ in
+            Task { await refresh() }
         }
     }
 

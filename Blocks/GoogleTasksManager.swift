@@ -16,6 +16,7 @@ final class GoogleTasksManager: ObservableObject {
 
     private let service = GoogleTasksService()
     private let authManager: AuthManager
+    private var isSyncing = false
 
     init(authManager: AuthManager) {
         self.authManager = authManager
@@ -35,6 +36,13 @@ final class GoogleTasksManager: ObservableObject {
     }
 
     func sync(context: ModelContext) async {
+        guard !isSyncing else {
+            print("[Tasks] Sync already in progress, skipping")
+            return
+        }
+        isSyncing = true
+        defer { isSyncing = false }
+
         print("[Tasks] Syncing all task lists")
         do {
             let token = try await authManager.validAccessToken()
