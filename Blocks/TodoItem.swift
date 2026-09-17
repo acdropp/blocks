@@ -14,6 +14,7 @@ final class TodoItem {
     var dueDate: Date?
     var createdAt: Date
     var googleTaskID: String?
+    var googleListID: String?
     var lastModified: Date?
 
     init(title: String, section: TodoSection = .other) {
@@ -23,6 +24,7 @@ final class TodoItem {
         self.dueDate = nil
         self.createdAt = Date()
         self.googleTaskID = nil
+        self.googleListID = nil
         self.lastModified = nil
     }
 }

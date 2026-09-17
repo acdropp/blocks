@@ -43,39 +43,75 @@ struct GoogleTasksService {
     private let baseURL = URL(string: "https://tasks.googleapis.com/tasks/v1")!
 
     func fetchTaskLists(accessToken: String) async throws -> [GoogleTaskList] {
-        let url = baseURL.appendingPathComponent("users/@me/lists")
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        var allLists: [GoogleTaskList] = []
+        var pageToken: String?
 
-        print("[Tasks] GET \(url.absoluteString)")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try Self.checkResponse(response, data: data, context: "fetch task lists")
+        repeat {
+            var queryItems = [URLQueryItem(name: "maxResults", value: "100")]
+            if let pageToken {
+                queryItems.append(URLQueryItem(name: "pageToken", value: pageToken))
+            }
+            var components = URLComponents(url: baseURL.appendingPathComponent("users/@me/lists"), resolvingAgainstBaseURL: false)!
+            components.queryItems = queryItems
+            let url = components.url!
 
-        let decoded = try JSONDecoder().decode(TaskListsResponse.self, from: data)
-        print("[Tasks] Fetched \(decoded.items?.count ?? 0) task list(s)")
-        return decoded.items ?? []
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+            print("[Tasks] GET \(url.absoluteString)")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try Self.checkResponse(response, data: data, context: "fetch task lists")
+
+            let decoded = try JSONDecoder().decode(TaskListsResponse.self, from: data)
+            allLists.append(contentsOf: decoded.items ?? [])
+            pageToken = decoded.nextPageToken
+        } while pageToken != nil
+
+        print("[Tasks] Fetched \(allLists.count) task list(s) total")
+        return allLists
     }
 
     private struct TaskListsResponse: Codable {
         let items: [GoogleTaskList]?
+        let nextPageToken: String?
     }
 
     func fetchTasks(listID: String, accessToken: String) async throws -> [GoogleTask] {
-        let url = baseURL.appendingPathComponent("lists/\(listID)/tasks")
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        var allTasks: [GoogleTask] = []
+        var pageToken: String?
 
-        print("[Tasks] GET \(url.absoluteString)")
-        let (data, response) = try await URLSession.shared.data(for: request)
-        try Self.checkResponse(response, data: data, context: "fetch tasks")
+        repeat {
+            var queryItems = [
+                URLQueryItem(name: "maxResults", value: "100"),
+                URLQueryItem(name: "showCompleted", value: "true"),
+                URLQueryItem(name: "showHidden", value: "true"),
+            ]
+            if let pageToken {
+                queryItems.append(URLQueryItem(name: "pageToken", value: pageToken))
+            }
+            var components = URLComponents(url: baseURL.appendingPathComponent("lists/\(listID)/tasks"), resolvingAgainstBaseURL: false)!
+            components.queryItems = queryItems
+            let url = components.url!
 
-        let decoded = try JSONDecoder().decode(TasksResponse.self, from: data)
-        print("[Tasks] Fetched \(decoded.items?.count ?? 0) task(s)")
-        return decoded.items ?? []
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+            print("[Tasks] GET \(url.absoluteString)")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try Self.checkResponse(response, data: data, context: "fetch tasks")
+
+            let decoded = try JSONDecoder().decode(TasksResponse.self, from: data)
+            allTasks.append(contentsOf: decoded.items ?? [])
+            pageToken = decoded.nextPageToken
+        } while pageToken != nil
+
+        print("[Tasks] Fetched \(allTasks.count) task(s) total for list \(listID)")
+        return allTasks
     }
 
     private struct TasksResponse: Codable {
         let items: [GoogleTask]?
+        let nextPageToken: String?
     }
 
     func insertTask(listID: String, title: String, accessToken: String) async throws -> GoogleTask {

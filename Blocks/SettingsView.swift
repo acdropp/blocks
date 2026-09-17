@@ -12,7 +12,7 @@ struct SettingsView: View {
                     authManager.signOut()
                 }
 
-                Picker("Task List", selection: $tasksManager.selectedTaskListID) {
+                Picker("New tasks go to", selection: $tasksManager.defaultTaskListID) {
                     Text("None").tag(String?.none)
                     ForEach(tasksManager.taskLists) { list in
                         Text(list.title).tag(Optional(list.id))

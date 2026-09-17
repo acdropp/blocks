@@ -109,9 +109,10 @@ struct ContentView: View {
     private func delete(_ item: TodoItem) {
         if selection == item.id { selection = nil }
         let taskID = item.googleTaskID
+        let listID = item.googleListID
         modelContext.delete(item)
-        if let taskID {
-            Task { await tasksManager.pushDelete(taskID: taskID) }
+        if let taskID, let listID {
+            Task { await tasksManager.pushDelete(taskID: taskID, listID: listID) }
         }
     }
 
@@ -130,13 +131,17 @@ private struct TodoRow: View {
 
     var body: some View {
         HStack {
-            Toggle("", isOn: $item.isCompleted)
-                .labelsHidden()
-                .toggleStyle(.checkbox)
-                .onChange(of: item.isCompleted) { _, _ in
+            Toggle("", isOn: Binding(
+                get: { item.isCompleted },
+                set: { newValue in
+                    item.isCompleted = newValue
                     item.lastModified = Date()
+                    print("[Tasks] Toggled completion for \"\(item.title)\": task=\(item.googleTaskID ?? "nil") list=\(item.googleListID ?? "nil") completed=\(newValue)")
                     Task { await tasksManager.pushUpdate(item) }
                 }
+            ))
+                .labelsHidden()
+                .toggleStyle(.checkbox)
 
             if isEditing {
                 TextField("Title", text: $draftTitle)
@@ -146,11 +151,24 @@ private struct TodoRow: View {
             } else {
                 Text(item.title)
                     .onTapGesture(count: 2) { beginEditing() }
+
+                Spacer()
+
+                if let listName {
+                    Text(listName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .onChange(of: isTitleFocused) { _, focused in
             if !focused && isEditing { commit() }
         }
+    }
+
+    private var listName: String? {
+        guard let listID = item.googleListID else { return nil }
+        return tasksManager.taskLists.first(where: { $0.id == listID })?.title
     }
 
     private func beginEditing() {
