@@ -8,6 +8,7 @@ struct ContentView: View {
     @Query private var items: [TodoItem]
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var tasksManager: GoogleTasksManager
+    @EnvironmentObject private var calendarManager: GoogleCalendarManager
 
     @State private var newTitle = ""
     @State private var isCompletedExpanded = false
@@ -190,9 +191,13 @@ struct ContentView: View {
         if selection == item.id { selection = nil }
         let taskID = item.googleTaskID
         let listID = item.googleListID
+        let eventID = item.calendarEventID
         modelContext.delete(item)
         if let taskID, let listID {
             Task { await tasksManager.pushDelete(taskID: taskID, listID: listID) }
+        }
+        if let eventID {
+            Task { await calendarManager.deleteBlock(eventID: eventID) }
         }
     }
 
@@ -320,14 +325,55 @@ private struct FindBar: View {
     }
 }
 
+private struct TimeBlockPopover: View {
+    let durationName: String
+    @Binding var startTime: Date
+    let onConfirm: () -> Void
+    let onRemove: (() -> Void)?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(durationName)
+                .font(.headline)
+            DatePicker("Start", selection: $startTime, displayedComponents: [.date, .hourAndMinute])
+                .datePickerStyle(.compact)
+                .labelsHidden()
+            if let onRemove {
+                Button("Remove", role: .destructive, action: onRemove)
+            }
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Confirm", action: onConfirm)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding()
+        .frame(width: 240)
+    }
+}
+
 private struct TodoRow: View {
     @Bindable var item: TodoItem
     @Binding var isEditing: Bool
     let searchQuery: String
     let currentMatchRange: Range<String.Index>?
     @EnvironmentObject private var tasksManager: GoogleTasksManager
+    @EnvironmentObject private var calendarManager: GoogleCalendarManager
     @FocusState private var isTitleFocused: Bool
     @State private var draftTitle = ""
+    @State private var isHovering = false
+    @State private var activeDurationPopover: TimeInterval?
+    @State private var pendingStartTime = Date()
+
+    private static let blockDurations: [(label: String, name: String, seconds: TimeInterval)] = [
+        ("15m", "15 minutes", 900),
+        ("30m", "30 minutes", 1800),
+        ("1h", "1 hour", 3600),
+        ("2h", "2 hours", 7200),
+    ]
 
     var body: some View {
         HStack {
@@ -354,6 +400,26 @@ private struct TodoRow: View {
 
                 Spacer()
 
+                if item.calendarEventID != nil {
+                    if let scheduledLabel {
+                        Text(scheduledLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .onTapGesture { openBlockEditor() }
+                    }
+                } else if isHovering {
+                    HStack(spacing: 4) {
+                        ForEach(Self.blockDurations, id: \.seconds) { block in
+                            Button(block.label) {
+                                pendingStartTime = Self.nextQuarterHour()
+                                activeDurationPopover = block.seconds
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.mini)
+                        }
+                    }
+                }
+
                 if let listName {
                     Text(listName)
                         .font(.caption)
@@ -361,6 +427,7 @@ private struct TodoRow: View {
                 }
             }
         }
+        .onHover { hovering in isHovering = hovering }
         .onChange(of: isEditing) { _, editing in
             if editing {
                 draftTitle = item.title
@@ -370,11 +437,72 @@ private struct TodoRow: View {
         .onChange(of: isTitleFocused) { _, focused in
             if !focused && isEditing { commit() }
         }
+        .sheet(isPresented: Binding(
+            get: { activeDurationPopover != nil },
+            set: { if !$0 { activeDurationPopover = nil } }
+        )) {
+            if let duration = activeDurationPopover,
+               let block = Self.blockDurations.first(where: { $0.seconds == duration }) {
+                TimeBlockPopover(
+                    durationName: block.name,
+                    startTime: $pendingStartTime,
+                    onConfirm: {
+                        confirmBlock(duration: duration)
+                        activeDurationPopover = nil
+                    },
+                    onRemove: item.calendarEventID != nil ? {
+                        removeBlock()
+                        activeDurationPopover = nil
+                    } : nil
+                )
+            }
+        }
     }
 
     private var listName: String? {
         guard let listID = item.googleListID else { return nil }
         return tasksManager.taskLists.first(where: { $0.id == listID })?.title
+    }
+
+    private var scheduledLabel: String? {
+        guard item.calendarEventID != nil, let dueDate = item.dueDate else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM/dd/yy EEE h:mm a"
+        return formatter.string(from: dueDate).uppercased()
+    }
+
+    private static func nextQuarterHour() -> Date {
+        let interval: TimeInterval = 15 * 60
+        let now = Date()
+        let remainder = now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: interval)
+        return remainder == 0 ? now : now.addingTimeInterval(interval - remainder)
+    }
+
+    private func openBlockEditor() {
+        pendingStartTime = item.dueDate ?? Self.nextQuarterHour()
+        activeDurationPopover = item.blockDurationSeconds ?? Self.blockDurations[2].seconds
+    }
+
+    private func confirmBlock(duration: TimeInterval) {
+        let startTime = pendingStartTime
+        Task {
+            let success = await calendarManager.scheduleBlock(for: item, duration: duration, startTime: startTime)
+            if success {
+                await tasksManager.pushUpdate(item)
+            }
+        }
+    }
+
+    private func removeBlock() {
+        guard let eventID = item.calendarEventID else { return }
+        item.calendarEventID = nil
+        item.dueDate = nil
+        item.blockDurationSeconds = nil
+        item.lastModified = Date()
+        Task {
+            await calendarManager.deleteBlock(eventID: eventID)
+            await tasksManager.clearDueDate(item)
+        }
     }
 
     private var highlightedTitle: AttributedString {

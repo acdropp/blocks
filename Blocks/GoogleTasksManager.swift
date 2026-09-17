@@ -150,6 +150,7 @@ final class GoogleTasksManager: ObservableObject {
                 taskID: taskID,
                 title: item.title,
                 isCompleted: item.isCompleted,
+                due: item.dueDate,
                 accessToken: token
             )
             print("[Tasks] Update confirmed for task \(taskID): status=\(remote.status ?? "nil")")
@@ -157,6 +158,20 @@ final class GoogleTasksManager: ObservableObject {
             errorMessage = nil
         } catch {
             print("[Tasks] Failed to push update for task \(taskID) in list \(listID): \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func clearDueDate(_ item: TodoItem) async {
+        guard let taskID = item.googleTaskID, let listID = item.googleListID else { return }
+        print("[Tasks] Clearing due date for task \(taskID)")
+        do {
+            let token = try await authManager.validAccessToken()
+            let remote = try await service.clearDueDate(listID: listID, taskID: taskID, accessToken: token)
+            item.lastModified = remote.updatedDate ?? Date()
+            errorMessage = nil
+        } catch {
+            print("[Tasks] Failed to clear due date for task \(taskID): \(error.localizedDescription)")
             errorMessage = error.localizedDescription
         }
     }

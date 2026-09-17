@@ -16,6 +16,9 @@ final class TodoItem {
     var googleTaskID: String?
     var googleListID: String?
     var lastModified: Date?
+    var blocksTaskID: String?
+    var calendarEventID: String?
+    var blockDurationSeconds: Double?
 
     init(title: String, section: TodoSection = .other) {
         self.title = title
@@ -26,5 +29,8 @@ final class TodoItem {
         self.googleTaskID = nil
         self.googleListID = nil
         self.lastModified = nil
+        self.blocksTaskID = nil
+        self.calendarEventID = nil
+        self.blockDurationSeconds = nil
     }
 }

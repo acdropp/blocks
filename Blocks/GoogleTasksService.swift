@@ -28,6 +28,31 @@ struct GoogleTask: Codable {
     }
 }
 
+private struct PatchTaskBody: Encodable {
+    let title: String
+    let status: String
+    let due: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case title, status, due
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(title, forKey: .title)
+        try container.encode(status, forKey: .status)
+        if let due {
+            try container.encode(due, forKey: .due)
+        }
+    }
+}
+
+/// Explicitly sends `"due": null` to clear a task's due date — unlike
+/// PatchTaskBody, this intentionally does NOT omit the key when nil.
+private struct ClearDueBody: Encodable {
+    let due: String? = nil
+}
+
 enum GoogleTasksError: LocalizedError {
     case requestFailed(status: Int, body: String)
 
@@ -131,16 +156,17 @@ struct GoogleTasksService {
         return task
     }
 
-    func patchTask(listID: String, taskID: String, title: String, isCompleted: Bool, accessToken: String) async throws -> GoogleTask {
+    func patchTask(listID: String, taskID: String, title: String, isCompleted: Bool, due: Date? = nil, accessToken: String) async throws -> GoogleTask {
         let url = baseURL.appendingPathComponent("lists/\(listID)/tasks/\(taskID)")
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode([
-            "title": title,
-            "status": isCompleted ? "completed" : "needsAction",
-        ])
+        request.httpBody = try JSONEncoder().encode(PatchTaskBody(
+            title: title,
+            status: isCompleted ? "completed" : "needsAction",
+            due: due.map(Self.formatDueDate)
+        ))
 
         print("[Tasks] PATCH \(url.absoluteString)")
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -148,6 +174,23 @@ struct GoogleTasksService {
 
         let task = try JSONDecoder().decode(GoogleTask.self, from: data)
         print("[Tasks] Updated task \(task.id)")
+        return task
+    }
+
+    func clearDueDate(listID: String, taskID: String, accessToken: String) async throws -> GoogleTask {
+        let url = baseURL.appendingPathComponent("lists/\(listID)/tasks/\(taskID)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(ClearDueBody())
+
+        print("[Tasks] PATCH \(url.absoluteString) (clear due date)")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try Self.checkResponse(response, data: data, context: "clear due date")
+
+        let task = try JSONDecoder().decode(GoogleTask.self, from: data)
+        print("[Tasks] Cleared due date for task \(task.id)")
         return task
     }
 
@@ -179,6 +222,13 @@ struct GoogleTasksService {
         let (data, response) = try await URLSession.shared.data(for: request)
         try Self.checkResponse(response, data: data, context: "delete task")
         print("[Tasks] Deleted task \(taskID)")
+    }
+
+    private static func formatDueDate(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02dT00:00:00.000Z", components.year ?? 1970, components.month ?? 1, components.day ?? 1)
     }
 
     private static func checkResponse(_ response: URLResponse, data: Data, context: String) throws {
