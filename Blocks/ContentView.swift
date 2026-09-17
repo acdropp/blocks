@@ -14,6 +14,11 @@ struct ContentView: View {
     @State private var selection: PersistentIdentifier?
     @State private var editingItemID: PersistentIdentifier?
 
+    @State private var isFindBarVisible = false
+    @State private var searchQuery = ""
+    @State private var currentMatchIndex = 0
+    @FocusState private var isSearchFieldFocused: Bool
+
     private let autoSyncTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -23,38 +28,74 @@ struct ContentView: View {
                 .padding()
                 .onSubmit(addTask)
 
-            List(selection: $selection) {
-                Section("Top priorities") {
-                    ForEach(topPriorities) { item in
-                        row(for: item)
-                    }
+            if isFindBarVisible {
+                HStack {
+                    Spacer()
+                    FindBar(
+                        searchQuery: $searchQuery,
+                        isFocused: $isSearchFieldFocused,
+                        matchCount: searchMatches.count,
+                        currentMatchNumber: currentMatchIndex + 1,
+                        onNext: goToNextMatch,
+                        onPrevious: goToPreviousMatch
+                    )
                 }
-
-                Section("Other to-dos") {
-                    ForEach(otherToDos) { item in
-                        row(for: item)
-                    }
-                }
-
-                DisclosureGroup("Completed", isExpanded: $isCompletedExpanded) {
-                    ForEach(completed) { item in
-                        row(for: item)
-                    }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
+                .background {
+                    Button("Close Find") { closeFindBar() }
+                        .keyboardShortcut(.escape, modifiers: [])
+                        .hidden()
                 }
             }
-            .onDeleteCommand {
-                deleteSelected()
-            }
-            .background {
-                Button("Move to Top Priorities") { moveSelected(to: .topPriority) }
-                    .keyboardShortcut("1", modifiers: .command)
+
+            ScrollViewReader { proxy in
+                List(selection: $selection) {
+                    Section("Top priorities") {
+                        ForEach(topPriorities) { item in
+                            row(for: item)
+                        }
+                    }
+
+                    Section("Other to-dos") {
+                        ForEach(otherToDos) { item in
+                            row(for: item)
+                        }
+                    }
+
+                    DisclosureGroup("Completed", isExpanded: $isCompletedExpanded) {
+                        ForEach(completed) { item in
+                            row(for: item)
+                        }
+                    }
+                }
+                .onDeleteCommand {
+                    deleteSelected()
+                }
+                .background {
+                    Button("Move to Top Priorities") { moveSelected(to: .topPriority) }
+                        .keyboardShortcut("1", modifiers: .command)
+                        .hidden()
+                    Button("Move to Other To-dos") { moveSelected(to: .other) }
+                        .keyboardShortcut("2", modifiers: .command)
+                        .hidden()
+                    Button("Refresh") { Task { await refresh() } }
+                        .keyboardShortcut("r", modifiers: .command)
+                        .hidden()
+                    Button("Find") {
+                        isFindBarVisible = true
+                        isSearchFieldFocused = true
+                    }
+                    .keyboardShortcut("f", modifiers: .command)
                     .hidden()
-                Button("Move to Other To-dos") { moveSelected(to: .other) }
-                    .keyboardShortcut("2", modifiers: .command)
-                    .hidden()
-                Button("Refresh") { Task { await refresh() } }
-                    .keyboardShortcut("r", modifiers: .command)
-                    .hidden()
+                }
+                .onChange(of: currentMatchIndex) { _, _ in
+                    scrollToCurrentMatch(using: proxy)
+                }
+                .onChange(of: searchQuery) { _, _ in
+                    currentMatchIndex = 0
+                    scrollToCurrentMatch(using: proxy)
+                }
             }
         }
         .frame(minWidth: 320, minHeight: 400)
@@ -78,10 +119,13 @@ struct ContentView: View {
 
     @ViewBuilder
     private func row(for item: TodoItem) -> some View {
-        TodoRow(item: item, isEditing: Binding(
+        let currentMatchRange: Range<String.Index>? = (currentMatch?.itemID == item.id) ? currentMatch?.range : nil
+        let isEditingBinding = Binding<Bool>(
             get: { editingItemID == item.id },
             set: { editingItemID = $0 ? item.id : nil }
-        ))
+        )
+
+        TodoRow(item: item, isEditing: isEditingBinding, searchQuery: searchQuery, currentMatchRange: currentMatchRange)
             .tag(item.id)
             .contextMenu {
                 Button("Move to Top Priorities") { move(item, to: .topPriority) }
@@ -170,11 +214,117 @@ struct ContentView: View {
             }
         }
     }
+
+    // MARK: - Find
+
+    private var orderedItems: [TodoItem] {
+        topPriorities + otherToDos + completed
+    }
+
+    private var searchMatches: [SearchMatch] {
+        guard !searchQuery.isEmpty else { return [] }
+        var matches: [SearchMatch] = []
+        for item in orderedItems {
+            let title = item.title
+            var searchStart = title.startIndex
+            while let range = title.range(of: searchQuery, options: .caseInsensitive, range: searchStart..<title.endIndex) {
+                matches.append(SearchMatch(itemID: item.id, range: range))
+                searchStart = range.upperBound
+            }
+        }
+        return matches
+    }
+
+    private var currentMatch: SearchMatch? {
+        guard searchMatches.indices.contains(currentMatchIndex) else { return nil }
+        return searchMatches[currentMatchIndex]
+    }
+
+    private func goToNextMatch() {
+        guard !searchMatches.isEmpty else { return }
+        currentMatchIndex = (currentMatchIndex + 1) % searchMatches.count
+    }
+
+    private func goToPreviousMatch() {
+        guard !searchMatches.isEmpty else { return }
+        currentMatchIndex = (currentMatchIndex - 1 + searchMatches.count) % searchMatches.count
+    }
+
+    private func closeFindBar() {
+        isFindBarVisible = false
+        searchQuery = ""
+        currentMatchIndex = 0
+        isSearchFieldFocused = false
+    }
+
+    private func scrollToCurrentMatch(using proxy: ScrollViewProxy) {
+        guard let match = currentMatch else { return }
+        if completed.contains(where: { $0.id == match.itemID }) {
+            isCompletedExpanded = true
+        }
+        DispatchQueue.main.async {
+            withAnimation {
+                proxy.scrollTo(match.itemID, anchor: .center)
+            }
+        }
+    }
+}
+
+private struct SearchMatch {
+    let itemID: PersistentIdentifier
+    let range: Range<String.Index>
+}
+
+private struct FindBar: View {
+    @Binding var searchQuery: String
+    var isFocused: FocusState<Bool>.Binding
+    let matchCount: Int
+    let currentMatchNumber: Int
+    let onNext: () -> Void
+    let onPrevious: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("Find", text: $searchQuery)
+                .textFieldStyle(.plain)
+                .focused(isFocused)
+                .onSubmit(onNext)
+                .frame(width: 120)
+
+            Text(matchCount == 0 ? "0/0" : "\(currentMatchNumber)/\(matchCount)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+
+            Button(action: onPrevious) {
+                Image(systemName: "chevron.up")
+            }
+            .buttonStyle(.plain)
+            .disabled(matchCount == 0)
+
+            Button(action: onNext) {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.plain)
+            .disabled(matchCount == 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .shadow(radius: 2)
+        .background {
+            Button("Previous Match") { onPrevious() }
+                .keyboardShortcut(.return, modifiers: .shift)
+                .hidden()
+        }
+    }
 }
 
 private struct TodoRow: View {
     @Bindable var item: TodoItem
     @Binding var isEditing: Bool
+    let searchQuery: String
+    let currentMatchRange: Range<String.Index>?
     @EnvironmentObject private var tasksManager: GoogleTasksManager
     @FocusState private var isTitleFocused: Bool
     @State private var draftTitle = ""
@@ -199,7 +349,7 @@ private struct TodoRow: View {
                     .focused($isTitleFocused)
                     .onSubmit(commit)
             } else {
-                Text(item.title)
+                Text(highlightedTitle)
                     .onTapGesture(count: 2) { isEditing = true }
 
                 Spacer()
@@ -225,6 +375,21 @@ private struct TodoRow: View {
     private var listName: String? {
         guard let listID = item.googleListID else { return nil }
         return tasksManager.taskLists.first(where: { $0.id == listID })?.title
+    }
+
+    private var highlightedTitle: AttributedString {
+        var attributed = AttributedString(item.title)
+        guard !searchQuery.isEmpty else { return attributed }
+
+        let title = item.title
+        var searchStart = title.startIndex
+        while let range = title.range(of: searchQuery, options: .caseInsensitive, range: searchStart..<title.endIndex) {
+            if let attrRange = Range(range, in: attributed) {
+                attributed[attrRange].backgroundColor = (range == currentMatchRange) ? .orange : .yellow
+            }
+            searchStart = range.upperBound
+        }
+        return attributed
     }
 
     private func commit() {
