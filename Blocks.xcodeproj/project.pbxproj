@@ -6,13 +6,31 @@
 	objectVersion = 90;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		4F775B49305B44AB0091B1D2 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 4F775B48305B44AB0091B1D2 /* GoogleSignIn */; };
+		4F775B4B305B44AB0091B1D2 /* GoogleSignInSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 4F775B4A305B44AB0091B1D2 /* GoogleSignInSwift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* Blocks.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Blocks.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		4F775B4D305B69A50091B1D2 /* Exceptions for "Blocks" folder in "Blocks" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 000000000000000100000000 /* Blocks */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		000000000000000000000010 /* Blocks */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				4F775B4D305B69A50091B1D2 /* Exceptions for "Blocks" folder in "Blocks" target */,
+			);
 			path = Blocks;
 			sourceTree = "<group>";
 		};
@@ -22,6 +40,8 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				4F775B49305B44AB0091B1D2 /* GoogleSignIn in Frameworks */,
+				4F775B4B305B44AB0091B1D2 /* GoogleSignInSwift in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -60,6 +80,10 @@
 				000000000000000000000010 /* Blocks */,
 			);
 			name = Blocks;
+			packageProductDependencies = (
+				4F775B48305B44AB0091B1D2 /* GoogleSignIn */,
+				4F775B4A305B44AB0091B1D2 /* GoogleSignInSwift */,
+			);
 			productName = MyApp;
 			productReference = 000000000000000000000120 /* Blocks.app */;
 			productType = "com.apple.product-type.application";
@@ -88,6 +112,9 @@
 			);
 			mainGroup = 000000000000000000000001;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				4F775B47305B44AB0091B1D2 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
 			preferredProjectObjectVersion = 90;
 			productRefGroup = 000000000000000000000020 /* Products */;
 			projectDirPath = "";
@@ -250,6 +277,7 @@
 		000000000000000111000000 /* Debug configuration for PBXNativeTarget "Blocks" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Blocks/Blocks.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -266,8 +294,8 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
-				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Blocks/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -300,6 +328,7 @@
 		000000000000000112000000 /* Release configuration for PBXNativeTarget "Blocks" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Blocks/Blocks.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -316,8 +345,8 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
-				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Blocks/Info.plist;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -367,6 +396,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		4F775B47305B44AB0091B1D2 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 10.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4F775B48305B44AB0091B1D2 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4F775B47305B44AB0091B1D2 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		4F775B4A305B44AB0091B1D2 /* GoogleSignInSwift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 4F775B47305B44AB0091B1D2 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignInSwift;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 000000000000000000000000 /* Project object */;
 }

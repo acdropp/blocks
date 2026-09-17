@@ -13,6 +13,8 @@ final class TodoItem {
     var section: TodoSection
     var dueDate: Date?
     var createdAt: Date
+    var googleTaskID: String?
+    var lastModified: Date?
 
     init(title: String, section: TodoSection = .other) {
         self.title = title
@@ -20,5 +22,7 @@ final class TodoItem {
         self.section = section
         self.dueDate = nil
         self.createdAt = Date()
+        self.googleTaskID = nil
+        self.lastModified = nil
     }
 }

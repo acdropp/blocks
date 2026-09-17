@@ -4,6 +4,8 @@ import SwiftData
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var items: [TodoItem]
+    @EnvironmentObject private var authManager: AuthManager
+    @EnvironmentObject private var tasksManager: GoogleTasksManager
 
     @State private var newTitle = ""
     @State private var isCompletedExpanded = false
@@ -45,9 +47,20 @@ struct ContentView: View {
                 Button("Move to Other To-dos") { moveSelected(to: .other) }
                     .keyboardShortcut("2", modifiers: .command)
                     .hidden()
+                Button("Refresh") { Task { await refresh() } }
+                    .keyboardShortcut("r", modifiers: .command)
+                    .hidden()
             }
         }
         .frame(minWidth: 320, minHeight: 400)
+        .task {
+            await authManager.restorePreviousSignIn()
+            await tasksManager.sync(context: modelContext)
+        }
+    }
+
+    private func refresh() async {
+        await tasksManager.sync(context: modelContext)
     }
 
     @ViewBuilder
@@ -77,8 +90,11 @@ struct ContentView: View {
     private func addTask() {
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        modelContext.insert(TodoItem(title: trimmed))
+        let item = TodoItem(title: trimmed)
+        item.lastModified = Date()
+        modelContext.insert(item)
         newTitle = ""
+        Task { await tasksManager.pushNewTask(item) }
     }
 
     private func move(_ item: TodoItem, to section: TodoSection) {
@@ -92,7 +108,11 @@ struct ContentView: View {
 
     private func delete(_ item: TodoItem) {
         if selection == item.id { selection = nil }
+        let taskID = item.googleTaskID
         modelContext.delete(item)
+        if let taskID {
+            Task { await tasksManager.pushDelete(taskID: taskID) }
+        }
     }
 
     private func deleteSelected() {
@@ -103,6 +123,7 @@ struct ContentView: View {
 
 private struct TodoRow: View {
     @Bindable var item: TodoItem
+    @EnvironmentObject private var tasksManager: GoogleTasksManager
     @FocusState private var isTitleFocused: Bool
     @State private var isEditing = false
     @State private var draftTitle = ""
@@ -112,6 +133,10 @@ private struct TodoRow: View {
             Toggle("", isOn: $item.isCompleted)
                 .labelsHidden()
                 .toggleStyle(.checkbox)
+                .onChange(of: item.isCompleted) { _, _ in
+                    item.lastModified = Date()
+                    Task { await tasksManager.pushUpdate(item) }
+                }
 
             if isEditing {
                 TextField("Title", text: $draftTitle)
@@ -136,8 +161,10 @@ private struct TodoRow: View {
 
     private func commit() {
         let trimmed = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
+        if !trimmed.isEmpty && trimmed != item.title {
             item.title = trimmed
+            item.lastModified = Date()
+            Task { await tasksManager.pushUpdate(item) }
         }
         isEditing = false
     }
