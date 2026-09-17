@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var newTitle = ""
     @State private var isCompletedExpanded = false
     @State private var selection: PersistentIdentifier?
+    @State private var editingItemID: PersistentIdentifier?
 
     private let autoSyncTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
@@ -77,7 +78,10 @@ struct ContentView: View {
 
     @ViewBuilder
     private func row(for item: TodoItem) -> some View {
-        TodoRow(item: item)
+        TodoRow(item: item, isEditing: Binding(
+            get: { editingItemID == item.id },
+            set: { editingItemID = $0 ? item.id : nil }
+        ))
             .tag(item.id)
             .contextMenu {
                 Button("Move to Top Priorities") { move(item, to: .topPriority) }
@@ -100,6 +104,8 @@ struct ContentView: View {
                         }
                     }
                 }
+                Divider()
+                Button("Rename") { editingItemID = item.id }
                 Divider()
                 Button("Delete", role: .destructive) { delete(item) }
             }
@@ -168,9 +174,9 @@ struct ContentView: View {
 
 private struct TodoRow: View {
     @Bindable var item: TodoItem
+    @Binding var isEditing: Bool
     @EnvironmentObject private var tasksManager: GoogleTasksManager
     @FocusState private var isTitleFocused: Bool
-    @State private var isEditing = false
     @State private var draftTitle = ""
 
     var body: some View {
@@ -194,7 +200,7 @@ private struct TodoRow: View {
                     .onSubmit(commit)
             } else {
                 Text(item.title)
-                    .onTapGesture(count: 2) { beginEditing() }
+                    .onTapGesture(count: 2) { isEditing = true }
 
                 Spacer()
 
@@ -205,6 +211,12 @@ private struct TodoRow: View {
                 }
             }
         }
+        .onChange(of: isEditing) { _, editing in
+            if editing {
+                draftTitle = item.title
+                isTitleFocused = true
+            }
+        }
         .onChange(of: isTitleFocused) { _, focused in
             if !focused && isEditing { commit() }
         }
@@ -213,12 +225,6 @@ private struct TodoRow: View {
     private var listName: String? {
         guard let listID = item.googleListID else { return nil }
         return tasksManager.taskLists.first(where: { $0.id == listID })?.title
-    }
-
-    private func beginEditing() {
-        draftTitle = item.title
-        isEditing = true
-        isTitleFocused = true
     }
 
     private func commit() {
