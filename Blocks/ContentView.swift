@@ -82,6 +82,24 @@ struct ContentView: View {
             .contextMenu {
                 Button("Move to Top Priorities") { move(item, to: .topPriority) }
                 Button("Move to Other To-dos") { move(item, to: .other) }
+                if item.googleListID != nil && !tasksManager.taskLists.isEmpty {
+                    Divider()
+                    Menu("Move to List") {
+                        ForEach(tasksManager.taskLists) { list in
+                            let isCurrent = list.id == item.googleListID
+                            Button {
+                                moveToGoogleList(item, to: list.id)
+                            } label: {
+                                if isCurrent {
+                                    Label(list.title, systemImage: "checkmark")
+                                } else {
+                                    Text(list.title)
+                                }
+                            }
+                            .disabled(isCurrent)
+                        }
+                    }
+                }
                 Divider()
                 Button("Delete", role: .destructive) { delete(item) }
             }
@@ -131,6 +149,20 @@ struct ContentView: View {
     private func deleteSelected() {
         guard let item = items.first(where: { $0.id == selection }) else { return }
         delete(item)
+    }
+
+    private func moveToGoogleList(_ item: TodoItem, to destinationListID: String) {
+        guard let taskID = item.googleTaskID,
+              let currentListID = item.googleListID,
+              destinationListID != currentListID else { return }
+
+        item.googleListID = destinationListID
+        Task {
+            if let errorMessage = await tasksManager.moveTask(taskID: taskID, from: currentListID, to: destinationListID) {
+                item.googleListID = currentListID
+                print("[Tasks] Reverted list label after failed move: \(errorMessage)")
+            }
+        }
     }
 }
 

@@ -151,6 +151,24 @@ struct GoogleTasksService {
         return task
     }
 
+    func moveTask(listID: String, taskID: String, destinationListID: String, accessToken: String) async throws -> GoogleTask {
+        var components = URLComponents(url: baseURL.appendingPathComponent("lists/\(listID)/tasks/\(taskID)/move"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "destinationTasklist", value: destinationListID)]
+        let url = components.url!
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        print("[Tasks] POST \(url.absoluteString)")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try Self.checkResponse(response, data: data, context: "move task")
+
+        let task = try JSONDecoder().decode(GoogleTask.self, from: data)
+        print("[Tasks] Moved task \(task.id) to list \(destinationListID)")
+        return task
+    }
+
     func deleteTask(listID: String, taskID: String, accessToken: String) async throws {
         let url = baseURL.appendingPathComponent("lists/\(listID)/tasks/\(taskID)")
         var request = URLRequest(url: url)

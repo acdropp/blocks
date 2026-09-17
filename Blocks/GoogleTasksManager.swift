@@ -172,4 +172,28 @@ final class GoogleTasksManager: ObservableObject {
             errorMessage = error.localizedDescription
         }
     }
+
+    /// Attempts to move a task to a different list. Returns nil on success,
+    /// or a short user-facing message if the move failed.
+    func moveTask(taskID: String, from listID: String, to destinationListID: String) async -> String? {
+        print("[Tasks] Moving task \(taskID) from list \(listID) to \(destinationListID)")
+        do {
+            let token = try await authManager.validAccessToken()
+            _ = try await service.moveTask(listID: listID, taskID: taskID, destinationListID: destinationListID, accessToken: token)
+            print("[Tasks] Move confirmed for task \(taskID)")
+            errorMessage = nil
+            return nil
+        } catch GoogleTasksError.requestFailed(let status, let body) {
+            print("[Tasks] Move failed for task \(taskID): HTTP \(status) \(body)")
+            let message = body.lowercased().contains("recurring")
+                ? "Recurring tasks can't be moved between lists."
+                : "Couldn't move task (HTTP \(status))."
+            errorMessage = message
+            return message
+        } catch {
+            print("[Tasks] Move failed for task \(taskID): \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            return error.localizedDescription
+        }
+    }
 }
