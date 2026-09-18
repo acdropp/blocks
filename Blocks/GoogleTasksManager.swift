@@ -68,11 +68,13 @@ final class GoogleTasksManager: ObservableObject {
 
             var importedCount = 0
             var updatedCount = 0
+            var seenTaskIDs: Set<String> = []
 
             for list in remoteLists {
                 let remoteTasks = try await service.fetchTasks(listID: list.id, accessToken: token)
 
                 for remote in remoteTasks where remote.deleted != true {
+                    seenTaskIDs.insert(remote.id)
                     let remoteUpdated = remote.updatedDate ?? Date()
 
                     if let existing = localByGoogleID[remote.id] {
@@ -81,7 +83,13 @@ final class GoogleTasksManager: ObservableObject {
                         guard remoteUpdated > localModified else { continue }
                         existing.title = remote.title ?? ""
                         existing.isCompleted = remote.isCompleted
-                        existing.dueDate = remote.dueDate
+                        // Google Tasks only stores a date, not a time. A task
+                        // with a linked calendar event uses dueDate to hold
+                        // that event's precise start time, so leave it alone
+                        // here — Calendar owns the time, not Tasks.
+                        if existing.calendarEventID == nil {
+                            existing.dueDate = remote.dueDate
+                        }
                         existing.lastModified = remoteUpdated
                         updatedCount += 1
                     } else {
@@ -100,10 +108,16 @@ final class GoogleTasksManager: ObservableObject {
 
             // A task whose list no longer appears among the lists we just
             // fetched means that list was deleted on Google — drop it locally.
+            // A task whose list still exists but whose own ID never showed up
+            // in that list's fetch means the task itself was deleted on
+            // Google (e.g. from another device) — drop it locally too.
             let validListIDs = Set(remoteLists.map(\.id))
             var removedCount = 0
             for item in localItems {
-                guard let listID = item.googleListID, !validListIDs.contains(listID) else { continue }
+                guard let listID = item.googleListID else { continue }
+                let listGone = !validListIDs.contains(listID)
+                let taskGone = !listGone && item.googleTaskID != nil && !seenTaskIDs.contains(item.googleTaskID!)
+                guard listGone || taskGone else { continue }
                 context.delete(item)
                 removedCount += 1
             }
