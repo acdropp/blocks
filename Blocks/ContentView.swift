@@ -584,13 +584,11 @@ private struct TodoRow: View {
                 Spacer()
 
                 Group {
-                    if item.calendarEventID != nil {
-                        if let scheduledLabel {
-                            Text(scheduledLabel)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .onTapGesture { openBlockEditor() }
-                        }
+                    if let scheduledLabel {
+                        Text(scheduledLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .onTapGesture { openBlockEditor() }
                     } else if isHovering {
                         HStack(spacing: 4) {
                             ForEach(Self.blockDurations, id: \.seconds) { block in
