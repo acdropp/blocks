@@ -22,6 +22,9 @@ struct ContentView: View {
     @State private var currentMatchIndex = 0
     @FocusState private var isSearchFieldFocused: Bool
 
+    @AppStorage("sortColumn") private var sortColumn: SortColumn = .manual
+    @AppStorage("sortDirection") private var sortDirection: SortDirection = .ascending
+
     private let autoSyncTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
     var body: some View {
@@ -51,6 +54,8 @@ struct ContentView: View {
                         .hidden()
                 }
             }
+
+            SortHeaderRow(sortColumn: $sortColumn, sortDirection: $sortDirection)
 
             ScrollViewReader { proxy in
                 List(selection: $selection) {
@@ -108,6 +113,7 @@ struct ContentView: View {
                     scrollToCurrentMatch(using: proxy)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .frame(minWidth: 320, minHeight: 400)
         .task {
@@ -202,15 +208,61 @@ struct ContentView: View {
     }
 
     private var topPriorities: [TodoItem] {
-        items.filter { $0.section == .topPriority && !$0.isCompleted }
+        sorted(items.filter { $0.section == .topPriority && !$0.isCompleted })
     }
 
     private var otherToDos: [TodoItem] {
-        items.filter { $0.section == .other && !$0.isCompleted }
+        sorted(items.filter { $0.section == .other && !$0.isCompleted })
     }
 
     private var completed: [TodoItem] {
-        items.filter { $0.isCompleted }
+        sorted(items.filter { $0.isCompleted })
+    }
+
+    // MARK: - Sort
+
+    private var listNamesByID: [String: String] {
+        Dictionary(uniqueKeysWithValues: tasksManager.taskLists.map { ($0.id, $0.title) })
+    }
+
+    private func sorted(_ tasks: [TodoItem]) -> [TodoItem] {
+        switch sortColumn {
+        case .manual:
+            return tasks.sorted { $0.createdAt < $1.createdAt }
+        case .task:
+            let ordered = tasks.sorted {
+                $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
+            }
+            return sortDirection == .ascending ? ordered : ordered.reversed()
+        case .due:
+            return tasks.sorted { compareDue($0, $1) }
+        case .list:
+            return tasks.sorted { compareList($0, $1) }
+        }
+    }
+
+    private func compareDue(_ lhs: TodoItem, _ rhs: TodoItem) -> Bool {
+        switch (lhs.dueDate, rhs.dueDate) {
+        case (nil, nil): return false
+        case (nil, _): return false
+        case (_, nil): return true
+        case let (l?, r?):
+            return sortDirection == .ascending ? l < r : l > r
+        }
+    }
+
+    private func compareList(_ lhs: TodoItem, _ rhs: TodoItem) -> Bool {
+        let names = listNamesByID
+        let lhsName = lhs.googleListID.flatMap { names[$0] }
+        let rhsName = rhs.googleListID.flatMap { names[$0] }
+        switch (lhsName, rhsName) {
+        case (nil, nil): return false
+        case (nil, _): return false
+        case (_, nil): return true
+        case let (l?, r?):
+            let comparison = l.localizedCaseInsensitiveCompare(r)
+            return sortDirection == .ascending ? comparison == .orderedAscending : comparison == .orderedDescending
+        }
     }
 
     private func addTask() {
@@ -323,6 +375,75 @@ struct ContentView: View {
 private struct SearchMatch {
     let itemID: PersistentIdentifier
     let range: Range<String.Index>
+}
+
+/// Shared column widths so the header row and every task row line up
+/// exactly, regardless of how long the due/list text is on any given row.
+private enum RowLayout {
+    static let leadingSpacerWidth: CGFloat = 18
+    static let dueColumnWidth: CGFloat = 150
+    static let listColumnWidth: CGFloat = 90
+}
+
+private enum SortColumn: String {
+    case manual, task, due, list
+}
+
+private enum SortDirection: String {
+    case ascending, descending
+}
+
+private struct SortHeaderRow: View {
+    @Binding var sortColumn: SortColumn
+    @Binding var sortDirection: SortDirection
+
+    var body: some View {
+        HStack {
+            Color.clear.frame(width: RowLayout.leadingSpacerWidth, height: 1)
+
+            headerButton("Task Name", column: .task)
+
+            Spacer()
+
+            headerButton("Scheduled Time", column: .due)
+                .frame(width: RowLayout.dueColumnWidth, alignment: .trailing)
+
+            headerButton("List Name", column: .list)
+                .frame(width: RowLayout.listColumnWidth, alignment: .trailing)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 6)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private func headerButton(_ title: String, column: SortColumn) -> some View {
+        Button {
+            toggle(column)
+        } label: {
+            HStack(spacing: 2) {
+                Text(title)
+                if sortColumn == column {
+                    Image(systemName: sortDirection == .ascending ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func toggle(_ column: SortColumn) {
+        if sortColumn != column {
+            sortColumn = column
+            sortDirection = .ascending
+        } else if sortDirection == .ascending {
+            sortDirection = .descending
+        } else {
+            sortColumn = .manual
+        }
+    }
 }
 
 private struct FindBar: View {
@@ -445,31 +566,37 @@ private struct TodoRow: View {
 
                 Spacer()
 
-                if item.calendarEventID != nil {
-                    if let scheduledLabel {
-                        Text(scheduledLabel)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .onTapGesture { openBlockEditor() }
-                    }
-                } else if isHovering {
-                    HStack(spacing: 4) {
-                        ForEach(Self.blockDurations, id: \.seconds) { block in
-                            Button(block.label) {
-                                pendingStartTime = Self.nextQuarterHour()
-                                activeDurationPopover = block.seconds
+                Group {
+                    if item.calendarEventID != nil {
+                        if let scheduledLabel {
+                            Text(scheduledLabel)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .onTapGesture { openBlockEditor() }
+                        }
+                    } else if isHovering {
+                        HStack(spacing: 4) {
+                            ForEach(Self.blockDurations, id: \.seconds) { block in
+                                Button(block.label) {
+                                    pendingStartTime = Self.nextQuarterHour()
+                                    activeDurationPopover = block.seconds
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.mini)
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.mini)
                         }
                     }
                 }
+                .frame(width: RowLayout.dueColumnWidth, alignment: .trailing)
 
-                if let listName {
-                    Text(listName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                Group {
+                    if let listName {
+                        Text(listName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .frame(width: RowLayout.listColumnWidth, alignment: .trailing)
             }
         }
         .onHover { hovering in isHovering = hovering }
