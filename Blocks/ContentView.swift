@@ -672,14 +672,14 @@ private struct TodoRow: View {
             let success = await calendarManager.scheduleBlock(for: item, duration: duration, startTime: startTime)
             if success {
                 await tasksManager.pushUpdate(item)
-                moveToListNamed("Scheduled")
+                moveToList(id: tasksManager.scheduledListID, settingName: "Scheduled list")
             }
         }
     }
 
     private func removeBlock() {
         guard let eventID = item.calendarEventID else { return }
-        let wasInScheduled = isInList(named: "Scheduled")
+        let wasInScheduled = isInList(id: tasksManager.scheduledListID)
         item.calendarEventID = nil
         item.dueDate = nil
         item.blockDurationSeconds = nil
@@ -689,44 +689,43 @@ private struct TodoRow: View {
             await tasksManager.clearDueDate(item)
         }
         if wasInScheduled {
-            moveToListNamed("OPT-OUT")
+            moveToList(id: tasksManager.optOutListID, settingName: "Opt-out list")
         }
     }
 
-    private func isInList(named name: String) -> Bool {
-        guard let listID = item.googleListID else {
-            print("[Tasks] isInList(\"\(name)\") for \"\(item.title)\": no googleListID")
-            return false
-        }
-        let match = tasksManager.taskLists.first(where: { $0.title.caseInsensitiveCompare(name) == .orderedSame })?.id == listID
-        print("[Tasks] isInList(\"\(name)\") for \"\(item.title)\": listID=\(listID), lists=\(tasksManager.taskLists.map { "\($0.title)=\($0.id)" }), match=\(match)")
-        return match
+    private func isInList(id targetListID: String?) -> Bool {
+        guard let targetListID, let listID = item.googleListID else { return false }
+        return listID == targetListID
     }
 
-    private func moveToListNamed(_ name: String) {
+    private func moveToList(id destinationID: String?, settingName: String) {
+        guard let destinationID else {
+            print("[Tasks] moveToList(\(settingName)) skipped for \"\(item.title)\": not set in Settings")
+            return
+        }
         guard let taskID = item.googleTaskID else {
-            print("[Tasks] moveToListNamed(\"\(name)\") skipped for \"\(item.title)\": no googleTaskID")
+            print("[Tasks] moveToList(\(settingName)) skipped for \"\(item.title)\": no googleTaskID")
             return
         }
         guard let currentListID = item.googleListID else {
-            print("[Tasks] moveToListNamed(\"\(name)\") skipped for \"\(item.title)\": no googleListID")
+            print("[Tasks] moveToList(\(settingName)) skipped for \"\(item.title)\": no googleListID")
             return
         }
-        guard let destination = tasksManager.taskLists.first(where: { $0.title.caseInsensitiveCompare(name) == .orderedSame }) else {
-            print("[Tasks] moveToListNamed(\"\(name)\") skipped for \"\(item.title)\": no list named \"\(name)\" found; available lists=\(tasksManager.taskLists.map(\.title))")
+        guard destinationID != currentListID else {
+            print("[Tasks] moveToList(\(settingName)) skipped for \"\(item.title)\": already in that list")
             return
         }
-        guard destination.id != currentListID else {
-            print("[Tasks] moveToListNamed(\"\(name)\") skipped for \"\(item.title)\": already in that list")
+        guard let destination = tasksManager.taskLists.first(where: { $0.id == destinationID }) else {
+            print("[Tasks] moveToList(\(settingName)) skipped for \"\(item.title)\": that list no longer exists")
             return
         }
 
-        print("[Tasks] Auto-moving \"\(item.title)\" to \"\(name)\" (\(destination.id))")
+        print("[Tasks] Auto-moving \"\(item.title)\" to \"\(destination.title)\" (\(destination.id))")
         item.googleListID = destination.id
         Task {
             if let errorMessage = await tasksManager.moveTask(taskID: taskID, from: currentListID, to: destination.id) {
                 item.googleListID = currentListID
-                print("[Tasks] Reverted auto-move to \"\(name)\": \(errorMessage)")
+                print("[Tasks] Reverted auto-move to \"\(destination.title)\": \(errorMessage)")
             }
         }
     }

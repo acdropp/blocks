@@ -25,6 +25,30 @@ struct SettingsView: View {
                 .task {
                     await tasksManager.loadTaskLists()
                 }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Auto-move lists")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Picker("Scheduled list", selection: $tasksManager.scheduledListID) {
+                        Text("None").tag(String?.none)
+                        ForEach(tasksManager.taskLists) { list in
+                            Text(list.title).tag(Optional(list.id))
+                        }
+                    }
+                    Picker("Opt-out list", selection: $tasksManager.optOutListID) {
+                        Text("None").tag(String?.none)
+                        ForEach(tasksManager.taskLists) { list in
+                            Text(list.title).tag(Optional(list.id))
+                        }
+                    }
+                    Text("Used when a task's time block is added or removed.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             } else {
                 Button("Sign in with Google") {
                     authManager.signIn()
@@ -48,7 +72,7 @@ struct SettingsView: View {
             }
         }
         .padding()
-        .frame(width: 320, height: 280)
+        .frame(width: 320, height: 380)
     }
 
     @ViewBuilder

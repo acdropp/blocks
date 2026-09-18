@@ -5,12 +5,31 @@ import SwiftData
 @MainActor
 final class GoogleTasksManager: ObservableObject {
     private static let defaultTaskListIDKey = "selectedGoogleTaskListID"
+    private static let scheduledListIDKey = "scheduledListID"
+    private static let optOutListIDKey = "optOutListID"
+    private static let fallbackScheduledListName = "SCHEDULED"
+    private static let fallbackOptOutListName = "OPT-OUT"
 
     @Published private(set) var taskLists: [GoogleTaskList] = []
     @Published private(set) var errorMessage: String?
     @Published var defaultTaskListID: String? {
         didSet {
             UserDefaults.standard.set(defaultTaskListID, forKey: Self.defaultTaskListIDKey)
+        }
+    }
+    // The Google Tasks lists the auto-move feature moves tasks between
+    // when a time block is added or removed, chosen in Settings the same
+    // way "New tasks go to" is. Stored by list ID rather than name, so
+    // renaming the list in Google Tasks never breaks this — only deleting
+    // it does.
+    @Published var scheduledListID: String? {
+        didSet {
+            UserDefaults.standard.set(scheduledListID, forKey: Self.scheduledListIDKey)
+        }
+    }
+    @Published var optOutListID: String? {
+        didSet {
+            UserDefaults.standard.set(optOutListID, forKey: Self.optOutListIDKey)
         }
     }
 
@@ -21,6 +40,21 @@ final class GoogleTasksManager: ObservableObject {
     init(authManager: AuthManager) {
         self.authManager = authManager
         self.defaultTaskListID = UserDefaults.standard.string(forKey: Self.defaultTaskListIDKey)
+        self.scheduledListID = UserDefaults.standard.string(forKey: Self.scheduledListIDKey)
+        self.optOutListID = UserDefaults.standard.string(forKey: Self.optOutListIDKey)
+    }
+
+    // The first time real task lists come back and no Scheduled/Opt-out
+    // list has been chosen yet, default to whichever list is named
+    // "SCHEDULED"/"OPT-OUT" (case-insensitive) so existing users don't
+    // have to visit Settings just to restore prior behavior.
+    private func backfillAutoMoveListIDsIfNeeded() {
+        if scheduledListID == nil {
+            scheduledListID = taskLists.first(where: { $0.title.caseInsensitiveCompare(Self.fallbackScheduledListName) == .orderedSame })?.id
+        }
+        if optOutListID == nil {
+            optOutListID = taskLists.first(where: { $0.title.caseInsensitiveCompare(Self.fallbackOptOutListName) == .orderedSame })?.id
+        }
     }
 
     func loadTaskLists() async {
@@ -28,6 +62,7 @@ final class GoogleTasksManager: ObservableObject {
         do {
             let token = try await authManager.validAccessToken()
             taskLists = try await service.fetchTaskLists(accessToken: token)
+            backfillAutoMoveListIDsIfNeeded()
             errorMessage = nil
         } catch {
             print("[Tasks] Failed to load task lists: \(error.localizedDescription)")
@@ -48,6 +83,7 @@ final class GoogleTasksManager: ObservableObject {
             let token = try await authManager.validAccessToken()
             let remoteLists = try await service.fetchTaskLists(accessToken: token)
             taskLists = remoteLists
+            backfillAutoMoveListIDsIfNeeded()
 
             let localItems = try context.fetch(FetchDescriptor<TodoItem>())
 
