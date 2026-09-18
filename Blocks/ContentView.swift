@@ -6,9 +6,11 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
     @Query private var items: [TodoItem]
+    @Query(sort: \InboxItem.createdAt, order: .reverse) private var inboxItems: [InboxItem]
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var tasksManager: GoogleTasksManager
     @EnvironmentObject private var calendarManager: GoogleCalendarManager
+    @EnvironmentObject private var fathomManager: FathomManager
 
     @State private var newTitle = ""
     @State private var isCompletedExpanded = false
@@ -52,6 +54,14 @@ struct ContentView: View {
 
             ScrollViewReader { proxy in
                 List(selection: $selection) {
+                    if !inboxItems.isEmpty {
+                        Section("From meetings") {
+                            ForEach(inboxItems) { item in
+                                inboxRow(for: item)
+                            }
+                        }
+                    }
+
                     Section("Top priorities") {
                         ForEach(topPriorities) { item in
                             row(for: item)
@@ -116,6 +126,41 @@ struct ContentView: View {
 
     private func refresh() async {
         await tasksManager.sync(context: modelContext)
+        await fathomManager.fetchNewActionItems(context: modelContext)
+    }
+
+    @ViewBuilder
+    private func inboxRow(for item: InboxItem) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.text)
+                Text(item.meetingName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            Menu("Accept") {
+                Button("Top Priorities") { acceptInboxItem(item, to: .topPriority) }
+                Button("Other To-dos") { acceptInboxItem(item, to: .other) }
+            }
+            .fixedSize()
+
+            Button("Dismiss") { dismissInboxItem(item) }
+        }
+    }
+
+    private func acceptInboxItem(_ item: InboxItem, to section: TodoSection) {
+        let newItem = TodoItem(title: item.text, section: section)
+        newItem.lastModified = Date()
+        modelContext.insert(newItem)
+        modelContext.delete(item)
+        Task { await tasksManager.pushNewTask(newItem) }
+    }
+
+    private func dismissInboxItem(_ item: InboxItem) {
+        modelContext.delete(item)
     }
 
     @ViewBuilder
