@@ -19,6 +19,7 @@ final class TodoItem {
     var blocksTaskID: String?
     var calendarEventID: String?
     var blockDurationSeconds: Double?
+    var manualOrder: Double?
 
     init(title: String, section: TodoSection = .other) {
         self.title = title
@@ -32,5 +33,6 @@ final class TodoItem {
         self.blocksTaskID = nil
         self.calendarEventID = nil
         self.blockDurationSeconds = nil
+        self.manualOrder = nil
     }
 }

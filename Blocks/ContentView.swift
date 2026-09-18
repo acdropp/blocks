@@ -117,6 +117,7 @@ struct ContentView: View {
         }
         .frame(minWidth: 320, minHeight: 400)
         .task {
+            ensureManualOrderAssigned()
             await authManager.restorePreviousSignIn()
             await refresh()
         }
@@ -160,6 +161,7 @@ struct ContentView: View {
     private func acceptInboxItem(_ item: InboxItem, to section: TodoSection) {
         let newItem = TodoItem(title: item.text, section: section)
         newItem.lastModified = Date()
+        newItem.manualOrder = nextManualOrder()
         modelContext.insert(newItem)
         modelContext.delete(item)
         Task { await tasksManager.pushNewTask(newItem) }
@@ -228,7 +230,7 @@ struct ContentView: View {
     private func sorted(_ tasks: [TodoItem]) -> [TodoItem] {
         switch sortColumn {
         case .manual:
-            return tasks.sorted { $0.createdAt < $1.createdAt }
+            return tasks.sorted { ($0.manualOrder ?? 0) < ($1.manualOrder ?? 0) }
         case .task:
             let ordered = tasks.sorted {
                 $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending
@@ -270,9 +272,24 @@ struct ContentView: View {
         guard !trimmed.isEmpty else { return }
         let item = TodoItem(title: trimmed)
         item.lastModified = Date()
+        item.manualOrder = nextManualOrder()
         modelContext.insert(item)
         newTitle = ""
         Task { await tasksManager.pushNewTask(item) }
+    }
+
+    // MARK: - Manual order & drag to reorder
+
+    private func ensureManualOrderAssigned() {
+        guard items.contains(where: { $0.manualOrder == nil }) else { return }
+        let byCreation = items.sorted { $0.createdAt < $1.createdAt }
+        for (index, item) in byCreation.enumerated() where item.manualOrder == nil {
+            item.manualOrder = Double(index)
+        }
+    }
+
+    private func nextManualOrder() -> Double {
+        (items.compactMap(\.manualOrder).max() ?? -1) + 1
     }
 
     private func move(_ item: TodoItem, to section: TodoSection) {
