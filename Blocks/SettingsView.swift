@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct SettingsView: View {
     @EnvironmentObject private var authManager: AuthManager
@@ -9,12 +10,32 @@ struct SettingsView: View {
     @State private var fathomKeyInput = ""
 
     var body: some View {
+        VStack(spacing: 0) {
+            mainContent
+                .padding()
+                .frame(maxHeight: .infinity, alignment: .top)
+
+            Divider()
+
+            Button("Close") {
+                NSApplication.shared.keyWindow?.close()
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 12)
+        }
+        .frame(width: 320, height: 410)
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
         VStack(spacing: 12) {
             if let email = authManager.email {
                 Text(email)
                 Button("Sign Out") {
                     authManager.signOut()
                 }
+
+                Divider()
 
                 Picker("New tasks go to", selection: $tasksManager.defaultTaskListID) {
                     Text("None").tag(String?.none)
@@ -71,8 +92,6 @@ struct SettingsView: View {
                     .font(.callout)
             }
         }
-        .padding()
-        .frame(width: 320, height: 380)
     }
 
     @ViewBuilder

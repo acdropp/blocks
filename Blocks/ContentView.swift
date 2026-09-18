@@ -13,6 +13,9 @@ struct ContentView: View {
     @EnvironmentObject private var fathomManager: FathomManager
 
     @State private var newTitle = ""
+    @State private var isFromMeetingsExpanded = true
+    @State private var isTopPrioritiesExpanded = true
+    @State private var isOtherToDosExpanded = true
     @State private var isCompletedExpanded = false
     @State private var selection: PersistentIdentifier?
     @State private var editingItemID: PersistentIdentifier?
@@ -28,6 +31,103 @@ struct ContentView: View {
     private let autoSyncTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
     var body: some View {
+        ScrollViewReader { proxy in
+            List(selection: $selection) {
+                if !inboxItems.isEmpty {
+                    DisclosureGroup(isExpanded: $isFromMeetingsExpanded) {
+                        Divider()
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                        ForEach(inboxItems) { item in
+                            inboxRow(for: item)
+                        }
+                    } label: {
+                        sectionLabel("FROM MEETINGS")
+                    }
+                }
+
+                quickAddBar
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+
+                SortHeaderRow(sortColumn: $sortColumn, sortDirection: $sortDirection)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+
+                DisclosureGroup(isExpanded: $isTopPrioritiesExpanded) {
+                    ForEach(topPriorities) { item in
+                        row(for: item)
+                    }
+                } label: {
+                    sectionLabel("TOP PRIORITIES")
+                }
+
+                DisclosureGroup(isExpanded: $isOtherToDosExpanded) {
+                    ForEach(otherToDos) { item in
+                        row(for: item)
+                    }
+                } label: {
+                    sectionLabel("OTHER TO-DOS")
+                }
+
+                DisclosureGroup(isExpanded: $isCompletedExpanded) {
+                    ForEach(completed) { item in
+                        row(for: item)
+                    }
+                } label: {
+                    sectionLabel("COMPLETED")
+                }
+            }
+            .onDeleteCommand {
+                deleteSelected()
+            }
+            .onChange(of: currentMatchIndex) { _, _ in
+                scrollToCurrentMatch(using: proxy)
+            }
+            .onChange(of: searchQuery) { _, _ in
+                currentMatchIndex = 0
+                scrollToCurrentMatch(using: proxy)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .blocksRefresh)) { _ in
+                Task { await refresh() }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .blocksFind)) { _ in
+                isFindBarVisible = true
+                isSearchFieldFocused = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .blocksMoveToTopPriorities)) { _ in
+                moveSelected(to: .topPriority)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .blocksMoveToOther)) { _ in
+                moveSelected(to: .other)
+            }
+        }
+        .frame(minWidth: 320, minHeight: 400)
+        .task {
+            ensureManualOrderAssigned()
+            await authManager.restorePreviousSignIn()
+            await refresh()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await refresh() }
+            }
+        }
+        .onReceive(autoSyncTimer) { _ in
+            Task { await refresh() }
+        }
+    }
+
+    private func sectionLabel(_ title: String) -> some View {
+        HStack(spacing: 0) {
+            Color.clear.frame(width: RowLayout.sectionLabelIndent, height: 1)
+            Text(title)
+                .font(.headline)
+        }
+    }
+
+    @ViewBuilder
+    private var quickAddBar: some View {
         VStack(spacing: 0) {
             TextField("Add a task", text: $newTitle)
                 .textFieldStyle(.roundedBorder)
@@ -54,78 +154,9 @@ struct ContentView: View {
                         .hidden()
                 }
             }
-
-            SortHeaderRow(sortColumn: $sortColumn, sortDirection: $sortDirection)
-
-            ScrollViewReader { proxy in
-                List(selection: $selection) {
-                    if !inboxItems.isEmpty {
-                        Section("From meetings") {
-                            ForEach(inboxItems) { item in
-                                inboxRow(for: item)
-                            }
-                        }
-                    }
-
-                    Section("Top priorities") {
-                        ForEach(topPriorities) { item in
-                            row(for: item)
-                        }
-                    }
-
-                    Section("Other to-dos") {
-                        ForEach(otherToDos) { item in
-                            row(for: item)
-                        }
-                    }
-
-                    DisclosureGroup("Completed", isExpanded: $isCompletedExpanded) {
-                        ForEach(completed) { item in
-                            row(for: item)
-                        }
-                    }
-                }
-                .onDeleteCommand {
-                    deleteSelected()
-                }
-                .onChange(of: currentMatchIndex) { _, _ in
-                    scrollToCurrentMatch(using: proxy)
-                }
-                .onChange(of: searchQuery) { _, _ in
-                    currentMatchIndex = 0
-                    scrollToCurrentMatch(using: proxy)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .blocksRefresh)) { _ in
-                    Task { await refresh() }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .blocksFind)) { _ in
-                    isFindBarVisible = true
-                    isSearchFieldFocused = true
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .blocksMoveToTopPriorities)) { _ in
-                    moveSelected(to: .topPriority)
-                }
-                .onReceive(NotificationCenter.default.publisher(for: .blocksMoveToOther)) { _ in
-                    moveSelected(to: .other)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .frame(minWidth: 320, minHeight: 400)
-        .task {
-            ensureManualOrderAssigned()
-            await authManager.restorePreviousSignIn()
-            await refresh()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
-                Task { await refresh() }
-            }
-        }
-        .onReceive(autoSyncTimer) { _ in
-            Task { await refresh() }
         }
     }
+
 
     private func refresh() async {
         await tasksManager.sync(context: modelContext)
@@ -135,6 +166,8 @@ struct ContentView: View {
     @ViewBuilder
     private func inboxRow(for item: InboxItem) -> some View {
         HStack {
+            Color.clear.frame(width: RowLayout.inboxRowIndent, height: 1)
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.text)
                 Text(item.meetingName)
@@ -396,6 +429,15 @@ private enum RowLayout {
     static let leadingSpacerWidth: CGFloat = 18
     static let dueColumnWidth: CGFloat = 150
     static let listColumnWidth: CGFloat = 90
+    // DisclosureGroup reserves extra leading space for its own triangle
+    // that a plain row (checkbox + title) doesn't have, so its label needs
+    // a bigger push than leadingSpacerWidth to line up with row text below it.
+    static let sectionLabelIndent: CGFloat = 34
+    // Rows nested inside a DisclosureGroup's content (like inbox rows under
+    // FROM MEETINGS) sit further right than the DisclosureGroup's own label
+    // by AppKit's built-in outline indent; this offsets that so inbox row
+    // text lines up with a sibling section's label text (e.g. TOP PRIORITIES).
+    static let inboxRowIndent: CGFloat = 14
 }
 
 private enum SortColumn: String {
@@ -414,14 +456,14 @@ private struct SortHeaderRow: View {
         HStack {
             Color.clear.frame(width: RowLayout.leadingSpacerWidth, height: 1)
 
-            headerButton("Task Name", column: .task)
+            headerButton("TASK NAME", column: .task)
 
             Spacer()
 
-            headerButton("Scheduled Time", column: .due)
+            headerButton("SCHEDULED TIME", column: .due)
                 .frame(width: RowLayout.dueColumnWidth, alignment: .trailing)
 
-            headerButton("List Name", column: .list)
+            headerButton("LIST NAME", column: .list)
                 .frame(width: RowLayout.listColumnWidth, alignment: .trailing)
         }
         .font(.caption)
