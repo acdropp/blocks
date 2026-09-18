@@ -672,12 +672,14 @@ private struct TodoRow: View {
             let success = await calendarManager.scheduleBlock(for: item, duration: duration, startTime: startTime)
             if success {
                 await tasksManager.pushUpdate(item)
+                moveToListNamed("Scheduled")
             }
         }
     }
 
     private func removeBlock() {
         guard let eventID = item.calendarEventID else { return }
+        let wasInScheduled = isInList(named: "Scheduled")
         item.calendarEventID = nil
         item.dueDate = nil
         item.blockDurationSeconds = nil
@@ -685,6 +687,47 @@ private struct TodoRow: View {
         Task {
             await calendarManager.deleteBlock(eventID: eventID)
             await tasksManager.clearDueDate(item)
+        }
+        if wasInScheduled {
+            moveToListNamed("OPT-OUT")
+        }
+    }
+
+    private func isInList(named name: String) -> Bool {
+        guard let listID = item.googleListID else {
+            print("[Tasks] isInList(\"\(name)\") for \"\(item.title)\": no googleListID")
+            return false
+        }
+        let match = tasksManager.taskLists.first(where: { $0.title.caseInsensitiveCompare(name) == .orderedSame })?.id == listID
+        print("[Tasks] isInList(\"\(name)\") for \"\(item.title)\": listID=\(listID), lists=\(tasksManager.taskLists.map { "\($0.title)=\($0.id)" }), match=\(match)")
+        return match
+    }
+
+    private func moveToListNamed(_ name: String) {
+        guard let taskID = item.googleTaskID else {
+            print("[Tasks] moveToListNamed(\"\(name)\") skipped for \"\(item.title)\": no googleTaskID")
+            return
+        }
+        guard let currentListID = item.googleListID else {
+            print("[Tasks] moveToListNamed(\"\(name)\") skipped for \"\(item.title)\": no googleListID")
+            return
+        }
+        guard let destination = tasksManager.taskLists.first(where: { $0.title.caseInsensitiveCompare(name) == .orderedSame }) else {
+            print("[Tasks] moveToListNamed(\"\(name)\") skipped for \"\(item.title)\": no list named \"\(name)\" found; available lists=\(tasksManager.taskLists.map(\.title))")
+            return
+        }
+        guard destination.id != currentListID else {
+            print("[Tasks] moveToListNamed(\"\(name)\") skipped for \"\(item.title)\": already in that list")
+            return
+        }
+
+        print("[Tasks] Auto-moving \"\(item.title)\" to \"\(name)\" (\(destination.id))")
+        item.googleListID = destination.id
+        Task {
+            if let errorMessage = await tasksManager.moveTask(taskID: taskID, from: currentListID, to: destination.id) {
+                item.googleListID = currentListID
+                print("[Tasks] Reverted auto-move to \"\(name)\": \(errorMessage)")
+            }
         }
     }
 
