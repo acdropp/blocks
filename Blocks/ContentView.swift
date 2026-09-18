@@ -88,29 +88,25 @@ struct ContentView: View {
                 .onDeleteCommand {
                     deleteSelected()
                 }
-                .background {
-                    Button("Move to Top Priorities") { moveSelected(to: .topPriority) }
-                        .keyboardShortcut("1", modifiers: .command)
-                        .hidden()
-                    Button("Move to Other To-dos") { moveSelected(to: .other) }
-                        .keyboardShortcut("2", modifiers: .command)
-                        .hidden()
-                    Button("Refresh") { Task { await refresh() } }
-                        .keyboardShortcut("r", modifiers: .command)
-                        .hidden()
-                    Button("Find") {
-                        isFindBarVisible = true
-                        isSearchFieldFocused = true
-                    }
-                    .keyboardShortcut("f", modifiers: .command)
-                    .hidden()
-                }
                 .onChange(of: currentMatchIndex) { _, _ in
                     scrollToCurrentMatch(using: proxy)
                 }
                 .onChange(of: searchQuery) { _, _ in
                     currentMatchIndex = 0
                     scrollToCurrentMatch(using: proxy)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .blocksRefresh)) { _ in
+                    Task { await refresh() }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .blocksFind)) { _ in
+                    isFindBarVisible = true
+                    isSearchFieldFocused = true
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .blocksMoveToTopPriorities)) { _ in
+                    moveSelected(to: .topPriority)
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .blocksMoveToOther)) { _ in
+                    moveSelected(to: .other)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
