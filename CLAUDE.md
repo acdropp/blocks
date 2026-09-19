@@ -24,6 +24,7 @@ Full product description: specs/product.md
 - Fathom: no webhooks (no public URL). Fetch new meetings with action items using a created-after filter. Check the current Fathom API docs before writing this code.
 - Google account is a personal Gmail.
 - The Google OAuth client ID (iOS client type) is not a secret. It goes in the app's Info settings as GIDClientID, with the reversed client ID as a URL scheme. The downloaded client plist is stored outside the repo.
+- On each sync, Calendar changes flow back into Blocks for any task with a block: if the event's time changed, Blocks updates to match; if the event was deleted, the task's block is cleared (the task itself is kept). Calendar always wins if it disagrees with Blocks or Tasks.
 
 ## How to work with Aaron
 - Aaron is new to Xcode and Swift and wants a step-by-step walkthrough.

@@ -160,6 +160,15 @@ struct ContentView: View {
 
     private func refresh() async {
         await tasksManager.sync(context: modelContext)
+
+        let calendarChanges = await calendarManager.pullChanges(context: modelContext)
+        for item in calendarChanges.updated {
+            await tasksManager.pushUpdate(item)
+        }
+        for item in calendarChanges.cleared {
+            await tasksManager.clearDueDate(item)
+        }
+
         await fathomManager.fetchNewActionItems(context: modelContext)
     }
 
