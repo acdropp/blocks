@@ -222,6 +222,7 @@ struct ContentView: View {
             .contextMenu {
                 Button("Move to Top Priorities") { move(item, to: .topPriority) }
                 Button("Move to Other To-dos") { move(item, to: .other) }
+                Button("Move to Completed") { completeTask(item) }
                 if item.googleListID != nil && !tasksManager.taskLists.isEmpty {
                     Divider()
                     Menu("Move to List") {
@@ -332,6 +333,13 @@ struct ContentView: View {
 
     private func move(_ item: TodoItem, to section: TodoSection) {
         item.section = section
+    }
+
+    private func completeTask(_ item: TodoItem) {
+        item.isCompleted = true
+        item.lastModified = Date()
+        print("[Tasks] Completed via context menu for \"\(item.title)\": task=\(item.googleTaskID ?? "nil") list=\(item.googleListID ?? "nil")")
+        Task { await tasksManager.pushUpdate(item) }
     }
 
     private func moveSelected(to section: TodoSection) {
