@@ -5,12 +5,14 @@ import SwiftData
 final class InboxItem {
     var text: String
     var meetingName: String
+    var accountName: String = ""
     var dedupKey: String
     var createdAt: Date
 
-    init(text: String, meetingName: String, dedupKey: String) {
+    init(text: String, meetingName: String, accountName: String, dedupKey: String) {
         self.text = text
         self.meetingName = meetingName
+        self.accountName = accountName
         self.dedupKey = dedupKey
         self.createdAt = Date()
     }

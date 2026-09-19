@@ -179,7 +179,7 @@ struct ContentView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.text)
-                Text(item.meetingName)
+                Text("\(item.meetingName) · \(item.accountName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

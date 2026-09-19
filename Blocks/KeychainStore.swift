@@ -1,12 +1,42 @@
 import Foundation
-import Foundation
 import Security
 
+/// One Keychain entry per Fathom account, keyed by that account's generated
+/// ID. Never logs a key value, only status codes.
 enum FathomKeychain {
     private static let service = "com.acdropp.Blocks.fathom"
-    private static let account = "FathomAPIKey"
+    private static let legacyAccount = "FathomAPIKey"
 
-    private static var baseQuery: [String: Any] {
+    private static func accountAttribute(for accountID: String) -> String {
+        "FathomAPIKey.\(accountID)"
+    }
+
+    @discardableResult
+    static func save(_ key: String, accountID: String) -> Bool {
+        save(key, keychainAccount: accountAttribute(for: accountID))
+    }
+
+    static func load(accountID: String) -> String? {
+        load(keychainAccount: accountAttribute(for: accountID))
+    }
+
+    static func delete(accountID: String) {
+        delete(keychainAccount: accountAttribute(for: accountID))
+    }
+
+    // MARK: - One-time migration from the old single-account storage
+
+    static func loadLegacyKey() -> String? {
+        load(keychainAccount: legacyAccount)
+    }
+
+    static func deleteLegacyKey() {
+        delete(keychainAccount: legacyAccount)
+    }
+
+    // MARK: - Shared implementation
+
+    private static func query(account: String) -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -15,7 +45,8 @@ enum FathomKeychain {
     }
 
     @discardableResult
-    static func save(_ key: String) -> Bool {
+    private static func save(_ key: String, keychainAccount: String) -> Bool {
+        let baseQuery = query(account: keychainAccount)
         SecItemDelete(baseQuery as CFDictionary)
         var attributes = baseQuery
         attributes[kSecValueData as String] = Data(key.utf8)
@@ -28,8 +59,8 @@ enum FathomKeychain {
         return true
     }
 
-    static func load() -> String? {
-        var query = baseQuery
+    private static func load(keychainAccount: String) -> String? {
+        var query = query(account: keychainAccount)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
@@ -44,7 +75,7 @@ enum FathomKeychain {
         return String(data: data, encoding: .utf8)
     }
 
-    static func delete() {
-        SecItemDelete(baseQuery as CFDictionary)
+    private static func delete(keychainAccount: String) {
+        SecItemDelete(query(account: keychainAccount) as CFDictionary)
     }
 }

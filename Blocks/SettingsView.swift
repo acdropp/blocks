@@ -6,14 +6,16 @@ struct SettingsView: View {
     @EnvironmentObject private var tasksManager: GoogleTasksManager
     @EnvironmentObject private var fathomManager: FathomManager
 
-    @State private var isEditingFathomKey = false
-    @State private var fathomKeyInput = ""
+    @State private var newAccountName = ""
+    @State private var newAccountKey = ""
 
     var body: some View {
         VStack(spacing: 0) {
-            mainContent
-                .padding()
-                .frame(maxHeight: .infinity, alignment: .top)
+            ScrollView {
+                mainContent
+                    .padding()
+            }
+            .frame(maxHeight: .infinity)
 
             Divider()
 
@@ -23,7 +25,7 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.vertical, 12)
         }
-        .frame(width: 320, height: 410)
+        .frame(width: 340, height: 560)
     }
 
     @ViewBuilder
@@ -85,44 +87,58 @@ struct SettingsView: View {
             Divider()
 
             fathomSection
-
-            if let fathomError = fathomManager.errorMessage {
-                Text(fathomError)
-                    .foregroundStyle(.red)
-                    .font(.callout)
-            }
         }
     }
 
     @ViewBuilder
     private var fathomSection: some View {
-        if fathomManager.hasAPIKey && !isEditingFathomKey {
-            Text("Fathom API key is set")
-            HStack {
-                Button("Replace") {
-                    fathomKeyInput = ""
-                    isEditingFathomKey = true
-                }
-                Button("Remove") {
-                    fathomManager.removeAPIKey()
-                }
-            }
-        } else {
-            SecureField("Fathom API key", text: $fathomKeyInput)
-                .textFieldStyle(.roundedBorder)
-            HStack {
-                if fathomManager.hasAPIKey {
-                    Button("Cancel") {
-                        isEditingFathomKey = false
-                        fathomKeyInput = ""
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Fathom accounts")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if fathomManager.accounts.isEmpty {
+                Text("No accounts added")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(fathomManager.accounts) { account in
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(account.name)
+                            Spacer()
+                            Button("Remove") {
+                                fathomManager.removeAccount(account)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.red)
+                            .font(.caption)
+                        }
+                        if let error = fathomManager.accountErrors[account.id] {
+                            Text(error)
+                                .font(.caption2)
+                                .foregroundStyle(.red)
+                        }
                     }
                 }
-                Button("Save") {
-                    fathomManager.saveAPIKey(fathomKeyInput)
-                    fathomKeyInput = ""
-                    isEditingFathomKey = false
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Account name (e.g. Work)", text: $newAccountName)
+                    .textFieldStyle(.roundedBorder)
+                SecureField("API key", text: $newAccountKey)
+                    .textFieldStyle(.roundedBorder)
+                Button("Add Account") {
+                    fathomManager.addAccount(name: newAccountName, apiKey: newAccountKey)
+                    newAccountName = ""
+                    newAccountKey = ""
                 }
-                .disabled(fathomKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(
+                    newAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                    newAccountKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                )
             }
         }
     }
