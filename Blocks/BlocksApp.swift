@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import AppKit
 import GoogleSignIn
 
 extension Notification.Name {
@@ -10,17 +11,42 @@ extension Notification.Name {
 }
 
 @main struct BlocksApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     @StateObject private var authManager: AuthManager
     @StateObject private var tasksManager: GoogleTasksManager
     @StateObject private var calendarManager: GoogleCalendarManager
     @StateObject private var fathomManager: FathomManager
 
+    private let container: ModelContainer
+    private let hotKeyManager: HotKeyManager
+    private let quickAddController: QuickAddPanelController
+
     init() {
         let authManager = AuthManager()
         _authManager = StateObject(wrappedValue: authManager)
-        _tasksManager = StateObject(wrappedValue: GoogleTasksManager(authManager: authManager))
+        let tasksManager = GoogleTasksManager(authManager: authManager)
+        _tasksManager = StateObject(wrappedValue: tasksManager)
         _calendarManager = StateObject(wrappedValue: GoogleCalendarManager(authManager: authManager))
         _fathomManager = StateObject(wrappedValue: FathomManager())
+
+        let container = try! ModelContainer(for: TodoItem.self, InboxItem.self, SeenFathomItem.self)
+        self.container = container
+
+        let quickAddController = QuickAddPanelController(modelContext: container.mainContext, tasksManager: tasksManager)
+        self.quickAddController = quickAddController
+
+        let hotKeyManager = HotKeyManager { quickAddController.toggle() }
+        self.hotKeyManager = hotKeyManager
+        if let registrationError = hotKeyManager.register() {
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Quick-Add Hotkey Unavailable"
+                alert.informativeText = registrationError
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
+        }
     }
 
     var body: some Scene {
@@ -32,7 +58,7 @@ extension Notification.Name {
                 .environmentObject(fathomManager)
                 .onOpenURL { url in GIDSignIn.sharedInstance.handle(url) }
         }
-        .modelContainer(for: [TodoItem.self, InboxItem.self, SeenFathomItem.self])
+        .modelContainer(container)
         .commands {
             CommandGroup(after: .textEditing) {
                 Divider()

@@ -16,6 +16,7 @@ Full product description: specs/product.md
 - App Sandbox allows outgoing network connections only.
 - Sync runs on app launch, on Refresh (Command-R in the app), when the window becomes active, and every 5 minutes while the app is open. Never more than one sync runs at a time.
 - Keep the UI minimal: one window, three sections, no extra panels unless asked.
+- Command-Shift-A is a global hotkey (works even when Blocks isn't the active app) that opens a small floating quick-add field. Closing the main window no longer quits Blocks — it keeps running so the hotkey still works. Quit via Command-Q or the Dock menu.
 
 ## Integration facts
 - Google Tasks stores only a due date; any time is discarded. The Calendar event owns the time.
