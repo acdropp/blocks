@@ -3,6 +3,7 @@ import SwiftData
 
 enum TodoSection: String, Codable {
     case topPriority
+    case workPriority
     case other
 }
 

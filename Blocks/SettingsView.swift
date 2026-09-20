@@ -73,6 +73,32 @@ struct SettingsView: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Personal section")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Picker("Personal list", selection: $tasksManager.personalListID) {
+                        Text("None").tag(String?.none)
+                        ForEach(tasksManager.taskLists) { list in
+                            Text(list.title).tag(Optional(list.id))
+                        }
+                    }
+                    if tasksManager.personalListID == nil {
+                        Text("No personal list selected.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Toggle("Hide Personal Section", isOn: Binding(
+                        get: { !tasksManager.isPersonalSectionVisible },
+                        set: { tasksManager.isPersonalSectionVisible = !$0 }
+                    ))
+                        .toggleStyle(.checkbox)
+                }
             } else {
                 Button("Sign in with Google") {
                     authManager.signIn()

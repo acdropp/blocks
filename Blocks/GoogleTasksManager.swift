@@ -7,8 +7,11 @@ final class GoogleTasksManager: ObservableObject {
     private static let defaultTaskListIDKey = "selectedGoogleTaskListID"
     private static let scheduledListIDKey = "scheduledListID"
     private static let optOutListIDKey = "optOutListID"
+    private static let personalListIDKey = "personalListID"
+    private static let isPersonalSectionVisibleKey = "isPersonalSectionVisible"
     private static let fallbackScheduledListName = "SCHEDULED"
     private static let fallbackOptOutListName = "OPT-OUT"
+    private static let fallbackPersonalListName = "(0) PERSONAL"
 
     @Published private(set) var taskLists: [GoogleTaskList] = []
     @Published private(set) var errorMessage: String?
@@ -32,6 +35,19 @@ final class GoogleTasksManager: ObservableObject {
             UserDefaults.standard.set(optOutListID, forKey: Self.optOutListIDKey)
         }
     }
+    // The Google Tasks list treated as the Personal section. Stored by ID
+    // (not name) so renaming the list never breaks this — only deleting it
+    // does, at which point it's cleared back to nil automatically.
+    @Published var personalListID: String? {
+        didSet {
+            UserDefaults.standard.set(personalListID, forKey: Self.personalListIDKey)
+        }
+    }
+    @Published var isPersonalSectionVisible: Bool {
+        didSet {
+            UserDefaults.standard.set(isPersonalSectionVisible, forKey: Self.isPersonalSectionVisibleKey)
+        }
+    }
 
     private let service = GoogleTasksService()
     private let authManager: AuthManager
@@ -42,12 +58,15 @@ final class GoogleTasksManager: ObservableObject {
         self.defaultTaskListID = UserDefaults.standard.string(forKey: Self.defaultTaskListIDKey)
         self.scheduledListID = UserDefaults.standard.string(forKey: Self.scheduledListIDKey)
         self.optOutListID = UserDefaults.standard.string(forKey: Self.optOutListIDKey)
+        self.personalListID = UserDefaults.standard.string(forKey: Self.personalListIDKey)
+        self.isPersonalSectionVisible = UserDefaults.standard.object(forKey: Self.isPersonalSectionVisibleKey) as? Bool ?? true
     }
 
-    // The first time real task lists come back and no Scheduled/Opt-out
-    // list has been chosen yet, default to whichever list is named
-    // "SCHEDULED"/"OPT-OUT" (case-insensitive) so existing users don't
-    // have to visit Settings just to restore prior behavior.
+    // The first time real task lists come back and no Scheduled/Opt-out/
+    // Personal list has been chosen yet, default to whichever list is
+    // named "SCHEDULED"/"OPT-OUT"/"(0) PERSONAL" (case-insensitive) so
+    // existing users don't have to visit Settings just to restore prior
+    // behavior.
     private func backfillAutoMoveListIDsIfNeeded() {
         if scheduledListID == nil {
             scheduledListID = taskLists.first(where: { $0.title.caseInsensitiveCompare(Self.fallbackScheduledListName) == .orderedSame })?.id
@@ -55,6 +74,18 @@ final class GoogleTasksManager: ObservableObject {
         if optOutListID == nil {
             optOutListID = taskLists.first(where: { $0.title.caseInsensitiveCompare(Self.fallbackOptOutListName) == .orderedSame })?.id
         }
+        if personalListID == nil {
+            personalListID = taskLists.first(where: { $0.title.caseInsensitiveCompare(Self.fallbackPersonalListName) == .orderedSame })?.id
+        }
+    }
+
+    // If the chosen personal list was deleted on Google's side, clear the
+    // selection rather than silently pointing at a list that no longer
+    // exists.
+    private func clearPersonalListIfDeleted() {
+        guard let personalListID, !taskLists.contains(where: { $0.id == personalListID }) else { return }
+        print("[Tasks] Personal list \(personalListID) no longer exists — clearing selection")
+        self.personalListID = nil
     }
 
     func loadTaskLists() async {
@@ -62,6 +93,7 @@ final class GoogleTasksManager: ObservableObject {
         do {
             let token = try await authManager.validAccessToken()
             taskLists = try await service.fetchTaskLists(accessToken: token)
+            clearPersonalListIfDeleted()
             backfillAutoMoveListIDsIfNeeded()
             errorMessage = nil
         } catch {
@@ -83,6 +115,7 @@ final class GoogleTasksManager: ObservableObject {
             let token = try await authManager.validAccessToken()
             let remoteLists = try await service.fetchTaskLists(accessToken: token)
             taskLists = remoteLists
+            clearPersonalListIfDeleted()
             backfillAutoMoveListIDsIfNeeded()
 
             let localItems = try context.fetch(FetchDescriptor<TodoItem>())

@@ -8,6 +8,7 @@ extension Notification.Name {
     static let blocksFind = Notification.Name("blocksFind")
     static let blocksMoveToTopPriorities = Notification.Name("blocksMoveToTopPriorities")
     static let blocksMoveToOther = Notification.Name("blocksMoveToOther")
+    static let blocksTogglePersonalSection = Notification.Name("blocksTogglePersonalSection")
 }
 
 @main struct BlocksApp: App {
@@ -83,6 +84,13 @@ extension Notification.Name {
                     NotificationCenter.default.post(name: .blocksMoveToOther, object: nil)
                 }
                 .keyboardShortcut("2", modifiers: .command)
+
+                Divider()
+
+                Button("Toggle Personal Section") {
+                    NotificationCenter.default.post(name: .blocksTogglePersonalSection, object: nil)
+                }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
             }
         }
 

@@ -15,8 +15,10 @@ struct ContentView: View {
     @State private var newTitle = ""
     @State private var isFromMeetingsExpanded = true
     @State private var isTopPrioritiesExpanded = true
+    @State private var isWorkPrioritiesExpanded = true
     @State private var isOtherToDosExpanded = true
     @State private var isCompletedExpanded = false
+    @AppStorage("isPersonalExpanded") private var isPersonalExpanded = false
     @State private var selection: PersistentIdentifier?
     @State private var editingItemID: PersistentIdentifier?
 
@@ -62,6 +64,14 @@ struct ContentView: View {
                     sectionLabel("TOP PRIORITIES")
                 }
 
+                DisclosureGroup(isExpanded: $isWorkPrioritiesExpanded) {
+                    ForEach(workPriorities) { item in
+                        row(for: item)
+                    }
+                } label: {
+                    sectionLabel("WORK PRIORITIES")
+                }
+
                 DisclosureGroup(isExpanded: $isOtherToDosExpanded) {
                     ForEach(otherToDos) { item in
                         row(for: item)
@@ -76,6 +86,16 @@ struct ContentView: View {
                     }
                 } label: {
                     sectionLabel("COMPLETED")
+                }
+
+                if tasksManager.isPersonalSectionVisible, tasksManager.personalListID != nil {
+                    DisclosureGroup(isExpanded: $isPersonalExpanded) {
+                        ForEach(personalItems) { item in
+                            row(for: item)
+                        }
+                    } label: {
+                        sectionLabel("PERSONAL")
+                    }
                 }
             }
             .onDeleteCommand {
@@ -100,6 +120,9 @@ struct ContentView: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: .blocksMoveToOther)) { _ in
                 moveSelected(to: .other)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .blocksTogglePersonalSection)) { _ in
+                tasksManager.isPersonalSectionVisible.toggle()
             }
         }
         .frame(minWidth: 320, minHeight: 400)
@@ -221,6 +244,7 @@ struct ContentView: View {
             .tag(item.id)
             .contextMenu {
                 Button("Move to Top Priorities") { move(item, to: .topPriority) }
+                Button("Move to Work Priorities") { move(item, to: .workPriority) }
                 Button("Move to Other To-dos") { move(item, to: .other) }
                 Button("Move to Completed") { completeTask(item) }
                 if item.googleListID != nil && !tasksManager.taskLists.isEmpty {
@@ -249,15 +273,29 @@ struct ContentView: View {
     }
 
     private var topPriorities: [TodoItem] {
-        sorted(items.filter { $0.section == .topPriority && !$0.isCompleted })
+        sorted(items.filter { $0.section == .topPriority && !$0.isCompleted && !isPersonalListItem($0) })
+    }
+
+    private var workPriorities: [TodoItem] {
+        sorted(items.filter { $0.section == .workPriority && !$0.isCompleted && !isPersonalListItem($0) })
     }
 
     private var otherToDos: [TodoItem] {
-        sorted(items.filter { $0.section == .other && !$0.isCompleted })
+        sorted(items.filter { $0.section == .other && !$0.isCompleted && !isPersonalListItem($0) })
     }
 
     private var completed: [TodoItem] {
-        sorted(items.filter { $0.isCompleted })
+        sorted(items.filter { $0.isCompleted && !isPersonalListItem($0) })
+    }
+
+    private var personalItems: [TodoItem] {
+        guard let personalListID = tasksManager.personalListID else { return [] }
+        return sorted(items.filter { $0.googleListID == personalListID })
+    }
+
+    private func isPersonalListItem(_ item: TodoItem) -> Bool {
+        guard let personalListID = tasksManager.personalListID else { return false }
+        return item.googleListID == personalListID
     }
 
     // MARK: - Sort
@@ -383,7 +421,11 @@ struct ContentView: View {
     // MARK: - Find
 
     private var orderedItems: [TodoItem] {
-        topPriorities + otherToDos + completed
+        var all = topPriorities + workPriorities + otherToDos + completed
+        if tasksManager.isPersonalSectionVisible {
+            all += personalItems
+        }
+        return all
     }
 
     private var searchMatches: [SearchMatch] {
@@ -426,6 +468,9 @@ struct ContentView: View {
         guard let match = currentMatch else { return }
         if completed.contains(where: { $0.id == match.itemID }) {
             isCompletedExpanded = true
+        }
+        if personalItems.contains(where: { $0.id == match.itemID }) {
+            isPersonalExpanded = true
         }
         DispatchQueue.main.async {
             withAnimation {
