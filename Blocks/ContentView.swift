@@ -211,6 +211,7 @@ struct ContentView: View {
 
             Menu("Accept") {
                 Button("Top Priorities") { acceptInboxItem(item, to: .topPriority) }
+                Button("Work Priorities") { acceptInboxItem(item, to: .workPriority) }
                 Button("Other To-dos") { acceptInboxItem(item, to: .other) }
             }
             .fixedSize()
