@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import Combine
+import AppKit
 
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
@@ -30,22 +31,26 @@ struct ContentView: View {
     @AppStorage("sortColumn") private var sortColumn: SortColumn = .manual
     @AppStorage("sortDirection") private var sortDirection: SortDirection = .ascending
 
+    // Bumped whenever refresh() runs (launch, Refresh, window-active, the
+    // 5-minute auto-sync timer) so late-task coloring re-evaluates without
+    // needing a restart, including across a midnight date rollover while
+    // the app is left open.
+    @State private var lateCheckAnchor = Date()
+
     private let autoSyncTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ScrollViewReader { proxy in
             List(selection: $selection) {
-                if !inboxItems.isEmpty {
-                    DisclosureGroup(isExpanded: $isFromMeetingsExpanded) {
-                        Divider()
-                            .listRowInsets(EdgeInsets())
-                            .listRowSeparator(.hidden)
-                        ForEach(inboxItems) { item in
-                            inboxRow(for: item)
-                        }
-                    } label: {
-                        sectionLabel("FROM MEETINGS")
+                DisclosureGroup(isExpanded: $isFromMeetingsExpanded) {
+                    Divider()
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                    ForEach(inboxItems) { item in
+                        inboxRow(for: item)
                     }
+                } label: {
+                    sectionLabel("FROM MEETINGS")
                 }
 
                 quickAddBar
@@ -182,6 +187,7 @@ struct ContentView: View {
 
 
     private func refresh() async {
+        lateCheckAnchor = Date()
         await tasksManager.sync(context: modelContext)
 
         let calendarChanges = await calendarManager.pullChanges(context: modelContext)
@@ -249,7 +255,7 @@ struct ContentView: View {
             set: { editingItemID = $0 ? item.id : nil }
         )
 
-        TodoRow(item: item, isEditing: isEditingBinding, searchQuery: searchQuery, currentMatchRange: currentMatchRange)
+        TodoRow(item: item, isEditing: isEditingBinding, searchQuery: searchQuery, currentMatchRange: currentMatchRange, isLate: isLate(item))
             .tag(item.id)
             .contextMenu {
                 Button("Move to Top Priorities") { move(item, to: .topPriority) }
@@ -305,6 +311,17 @@ struct ContentView: View {
     private func isPersonalListItem(_ item: TodoItem) -> Bool {
         guard let personalListID = tasksManager.personalListID else { return false }
         return item.googleListID == personalListID
+    }
+
+    // A task is late once the calendar day after its due date begins —
+    // a task due any time Monday becomes late at midnight Monday night.
+    // Applies to any due date, whether or not it has a scheduled time.
+    private func isLate(_ item: TodoItem) -> Bool {
+        guard !item.isCompleted, let dueDate = item.dueDate else { return false }
+        let calendar = Calendar.current
+        let dueDay = calendar.startOfDay(for: dueDate)
+        let today = calendar.startOfDay(for: lateCheckAnchor)
+        return today > dueDay
     }
 
     // MARK: - Sort
@@ -496,6 +513,18 @@ private struct SearchMatch {
 
 /// Shared column widths so the header row and every task row line up
 /// exactly, regardless of how long the due/list text is on any given row.
+extension Color {
+    /// Flags a late task's title, scheduled time, and list name. Tuned
+    /// separately for light and dark mode so it stays readable against
+    /// either background.
+    static let lateTask = Color(NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        return isDark
+            ? NSColor(red: 1.00, green: 0.45, blue: 0.55, alpha: 1.0)
+            : NSColor(red: 0.80, green: 0.20, blue: 0.32, alpha: 1.0)
+    })
+}
+
 private enum RowLayout {
     static let leadingSpacerWidth: CGFloat = 18
     static let dueColumnWidth: CGFloat = 150
@@ -652,6 +681,7 @@ private struct TodoRow: View {
     @Binding var isEditing: Bool
     let searchQuery: String
     let currentMatchRange: Range<String.Index>?
+    let isLate: Bool
     @EnvironmentObject private var tasksManager: GoogleTasksManager
     @EnvironmentObject private var calendarManager: GoogleCalendarManager
     @FocusState private var isTitleFocused: Bool
@@ -688,6 +718,7 @@ private struct TodoRow: View {
                     .onSubmit(commit)
             } else {
                 Text(highlightedTitle)
+                    .foregroundStyle(isLate ? Color.lateTask : Color.primary)
                     .onTapGesture(count: 2) { isEditing = true }
 
                 Spacer()
@@ -696,7 +727,7 @@ private struct TodoRow: View {
                     if let scheduledLabel {
                         Text(scheduledLabel)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(isLate ? Color.lateTask : Color.secondary)
                             .onTapGesture { openBlockEditor() }
                     } else if isHovering {
                         HStack(spacing: 4) {
@@ -717,7 +748,7 @@ private struct TodoRow: View {
                     if let listName {
                         Text(listName)
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(isLate ? Color.lateTask : Color.secondary)
                     }
                 }
                 .frame(width: RowLayout.listColumnWidth, alignment: .trailing)
