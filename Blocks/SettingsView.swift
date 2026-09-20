@@ -5,6 +5,7 @@ struct SettingsView: View {
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var tasksManager: GoogleTasksManager
     @EnvironmentObject private var fathomManager: FathomManager
+    @StateObject private var loginItemManager = LoginItemManager()
 
     @State private var newAccountName = ""
     @State private var newAccountKey = ""
@@ -87,7 +88,39 @@ struct SettingsView: View {
             Divider()
 
             fathomSection
+
+            Divider()
+
+            loginItemSection
         }
+    }
+
+    @ViewBuilder
+    private var loginItemSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle("Launch Blocks at login", isOn: loginItemBinding)
+
+            if loginItemManager.needsApproval {
+                Text("Enable Blocks in System Settings > General > Login Items & Extensions.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if let error = loginItemManager.errorMessage {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+        }
+        .task {
+            loginItemManager.refreshStatus()
+        }
+    }
+
+    private var loginItemBinding: Binding<Bool> {
+        Binding(
+            get: { loginItemManager.isEnabled },
+            set: { loginItemManager.setEnabled($0) }
+        )
     }
 
     @ViewBuilder
