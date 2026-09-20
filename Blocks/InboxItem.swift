@@ -6,13 +6,15 @@ final class InboxItem {
     var text: String
     var meetingName: String
     var accountName: String = ""
+    var assigneeName: String?
     var dedupKey: String
     var createdAt: Date
 
-    init(text: String, meetingName: String, accountName: String, dedupKey: String) {
+    init(text: String, meetingName: String, accountName: String, assigneeName: String?, dedupKey: String) {
         self.text = text
         self.meetingName = meetingName
         self.accountName = accountName
+        self.assigneeName = assigneeName
         self.dedupKey = dedupKey
         self.createdAt = Date()
     }

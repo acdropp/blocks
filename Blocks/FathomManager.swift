@@ -97,7 +97,7 @@ final class FathomManager: ObservableObject {
                     let dedupKey = Self.dedupKey(accountID: account.id, recordingId: meeting.recordingId, item: actionItem)
                     guard !seenKeys.contains(dedupKey) else { continue }
 
-                    let inboxItem = InboxItem(text: actionItem.description, meetingName: meeting.displayName, accountName: account.name, dedupKey: dedupKey)
+                    let inboxItem = InboxItem(text: actionItem.description, meetingName: meeting.displayName, accountName: account.name, assigneeName: actionItem.assignee?.name, dedupKey: dedupKey)
                     context.insert(inboxItem)
                     context.insert(SeenFathomItem(key: dedupKey))
                     importedCount += 1

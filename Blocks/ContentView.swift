@@ -202,7 +202,7 @@ struct ContentView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.text)
-                Text("\(item.meetingName) · \(item.accountName)")
+                Text(inboxSubtitle(for: item))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -217,6 +217,14 @@ struct ContentView: View {
 
             Button("Dismiss") { dismissInboxItem(item) }
         }
+    }
+
+    private func inboxSubtitle(for item: InboxItem) -> String {
+        var subtitle = "\(item.meetingName) · \(item.accountName)"
+        if let assigneeName = item.assigneeName, !assigneeName.isEmpty {
+            subtitle += " · \(assigneeName)"
+        }
+        return subtitle
     }
 
     private func acceptInboxItem(_ item: InboxItem, to section: TodoSection) {
