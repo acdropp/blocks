@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var isFromMeetingsExpanded = true
     @State private var isTopPrioritiesExpanded = true
     @State private var isWorkPrioritiesExpanded = true
+    @State private var isChoresExpanded = true
     @State private var isOtherToDosExpanded = true
     @State private var isCompletedExpanded = false
     @AppStorage("isPersonalExpanded") private var isPersonalExpanded = false
@@ -43,6 +44,10 @@ struct ContentView: View {
     var body: some View {
         ScrollViewReader { proxy in
             List(selection: $selection) {
+                quickAddBar
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+
                 DisclosureGroup(isExpanded: $isFromMeetingsExpanded) {
                     Divider()
                         .listRowInsets(EdgeInsets())
@@ -53,10 +58,6 @@ struct ContentView: View {
                 } label: {
                     sectionLabel("FROM MEETINGS")
                 }
-
-                quickAddBar
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
 
                 SortHeaderRow(sortColumn: $sortColumn, sortDirection: $sortDirection)
                     .listRowInsets(EdgeInsets())
@@ -76,6 +77,14 @@ struct ContentView: View {
                     }
                 } label: {
                     sectionLabel("WORK PRIORITIES")
+                }
+
+                DisclosureGroup(isExpanded: $isChoresExpanded) {
+                    ForEach(chores) { item in
+                        row(for: item)
+                    }
+                } label: {
+                    sectionLabel("CHORES")
                 }
 
                 DisclosureGroup(isExpanded: $isOtherToDosExpanded) {
@@ -233,6 +242,7 @@ struct ContentView: View {
             Menu("Accept") {
                 Button("Top Priorities") { acceptInboxItem(item, to: .topPriority) }
                 Button("Work Priorities") { acceptInboxItem(item, to: .workPriority) }
+                Button("Chores") { acceptInboxItem(item, to: .chores) }
                 Button("Other To-dos") { acceptInboxItem(item, to: .other) }
             }
             .fixedSize()
@@ -275,6 +285,7 @@ struct ContentView: View {
             .contextMenu {
                 Button("Move to Top Priorities") { move(item, to: .topPriority) }
                 Button("Move to Work Priorities") { move(item, to: .workPriority) }
+                Button("Move to Chores") { move(item, to: .chores) }
                 Button("Move to Other To-dos") { move(item, to: .other) }
                 Button("Move to Completed") { completeTask(item) }
                 if item.googleListID != nil && !tasksManager.taskLists.isEmpty {
@@ -308,6 +319,10 @@ struct ContentView: View {
 
     private var workPriorities: [TodoItem] {
         sorted(items.filter { $0.section == .workPriority && !$0.isCompleted && !isPersonalListItem($0) })
+    }
+
+    private var chores: [TodoItem] {
+        sorted(items.filter { $0.section == .chores && !$0.isCompleted && !isPersonalListItem($0) })
     }
 
     private var otherToDos: [TodoItem] {
@@ -513,7 +528,7 @@ struct ContentView: View {
     // MARK: - Find
 
     private var orderedItems: [TodoItem] {
-        var all = topPriorities + workPriorities + otherToDos + completed
+        var all = topPriorities + workPriorities + chores + otherToDos + completed
         if tasksManager.isPersonalSectionVisible {
             all += personalItems
         }
