@@ -6,6 +6,7 @@ import AppKit
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.undoManager) private var undoManager
     @Query private var items: [TodoItem]
     @Query(sort: \InboxItem.createdAt, order: .reverse) private var inboxItems: [InboxItem]
     @EnvironmentObject private var authManager: AuthManager
@@ -410,7 +411,14 @@ struct ContentView: View {
     }
 
     private func move(_ item: TodoItem, to section: TodoSection) {
+        let oldSection = item.section
+        guard oldSection != section else { return }
         item.section = section
+
+        undoManager?.registerUndo(withTarget: item) { [self] target in
+            move(target, to: oldSection)
+        }
+        undoManager?.setActionName("Move Task")
     }
 
     private func completeTask(_ item: TodoItem) {
@@ -435,6 +443,7 @@ struct ContentView: View {
         let listID = item.googleListID
         let eventID = item.calendarEventID
         let calendarID = item.calendarID
+        let snapshot = DeletedTaskSnapshot(item: item)
         modelContext.delete(item)
         if let taskID, let listID {
             Task { await tasksManager.pushDelete(taskID: taskID, listID: listID) }
@@ -442,6 +451,39 @@ struct ContentView: View {
         if let eventID {
             Task { await calendarManager.deleteBlock(calendarID: calendarID, eventID: eventID) }
         }
+
+        undoManager?.registerUndo(withTarget: modelContext) { [self] _ in
+            restore(snapshot)
+        }
+        undoManager?.setActionName("Delete Task")
+    }
+
+    private func restore(_ snapshot: DeletedTaskSnapshot) {
+        let restored = TodoItem(title: snapshot.title, section: snapshot.section)
+        restored.isCompleted = snapshot.isCompleted
+        restored.manualOrder = snapshot.manualOrder ?? nextManualOrder()
+        restored.lastModified = Date()
+        modelContext.insert(restored)
+        print("[Tasks] Undo delete: restored \"\(snapshot.title)\"")
+
+        Task {
+            await tasksManager.pushNewTask(restored)
+            if let originalListID = snapshot.googleListID, restored.googleListID != originalListID {
+                moveToGoogleList(restored, to: originalListID)
+            }
+            if snapshot.hadCalendarBlock, let dueDate = snapshot.dueDate, let duration = snapshot.blockDurationSeconds {
+                let listName = tasksManager.taskLists.first(where: { $0.id == (snapshot.googleListID ?? restored.googleListID) })?.title
+                let success = await calendarManager.scheduleBlock(for: restored, duration: duration, startTime: dueDate, listName: listName)
+                if success {
+                    await tasksManager.pushUpdate(restored)
+                }
+            }
+        }
+
+        undoManager?.registerUndo(withTarget: modelContext) { [self] _ in
+            delete(restored)
+        }
+        undoManager?.setActionName("Delete Task")
     }
 
     private func deleteSelected() {
@@ -461,6 +503,11 @@ struct ContentView: View {
                 print("[Tasks] Reverted list label after failed move: \(errorMessage)")
             }
         }
+
+        undoManager?.registerUndo(withTarget: item) { [self] target in
+            moveToGoogleList(target, to: currentListID)
+        }
+        undoManager?.setActionName("Move Task")
     }
 
     // MARK: - Find
@@ -528,6 +575,32 @@ struct ContentView: View {
 private struct SearchMatch {
     let itemID: PersistentIdentifier
     let range: Range<String.Index>
+}
+
+/// Captures what's needed to recreate a task after it's deleted, for Undo.
+/// The restored task gets fresh IDs on Google's side — the originals are
+/// gone once deleted there, so this isn't a byte-for-byte restore, just an
+/// equivalent task with the same content.
+private struct DeletedTaskSnapshot {
+    let title: String
+    let section: TodoSection
+    let isCompleted: Bool
+    let dueDate: Date?
+    let googleListID: String?
+    let manualOrder: Double?
+    let blockDurationSeconds: Double?
+    let hadCalendarBlock: Bool
+
+    init(item: TodoItem) {
+        title = item.title
+        section = item.section
+        isCompleted = item.isCompleted
+        dueDate = item.dueDate
+        googleListID = item.googleListID
+        manualOrder = item.manualOrder
+        blockDurationSeconds = item.blockDurationSeconds
+        hadCalendarBlock = item.calendarEventID != nil
+    }
 }
 
 /// Shared column widths so the header row and every task row line up
@@ -701,6 +774,7 @@ private struct TodoRow: View {
     let searchQuery: String
     let currentMatchRange: Range<String.Index>?
     let isLate: Bool
+    @Environment(\.undoManager) private var undoManager
     @EnvironmentObject private var tasksManager: GoogleTasksManager
     @EnvironmentObject private var calendarManager: GoogleCalendarManager
     @FocusState private var isTitleFocused: Bool
@@ -918,11 +992,22 @@ private struct TodoRow: View {
     private func commit() {
         let trimmed = draftTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty && trimmed != item.title {
-            item.title = trimmed
-            item.lastModified = Date()
-            Task { await tasksManager.pushUpdate(item) }
+            rename(item, to: trimmed)
         }
         isEditing = false
+    }
+
+    private func rename(_ item: TodoItem, to newTitle: String) {
+        let oldTitle = item.title
+        guard oldTitle != newTitle else { return }
+        item.title = newTitle
+        item.lastModified = Date()
+        Task { await tasksManager.pushUpdate(item) }
+
+        undoManager?.registerUndo(withTarget: item) { [self] target in
+            rename(target, to: oldTitle)
+        }
+        undoManager?.setActionName("Rename Task")
     }
 }
 

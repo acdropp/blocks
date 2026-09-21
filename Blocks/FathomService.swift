@@ -4,6 +4,7 @@ struct FathomAssignee: Codable {
     let name: String?
 }
 
+
 struct FathomActionItem: Codable {
     let description: String
     let completed: Bool?
