@@ -15,6 +15,7 @@ struct ContentView: View {
     @EnvironmentObject private var fathomManager: FathomManager
 
     @State private var newTitle = ""
+    @State private var isSyncing = false
     @State private var isFromMeetingsExpanded = true
     @State private var isTopPrioritiesExpanded = true
     @State private var isWorkPrioritiesExpanded = true
@@ -162,6 +163,28 @@ struct ContentView: View {
         .onReceive(autoSyncTimer) { _ in
             Task { await refresh() }
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                syncStatusView
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var syncStatusView: some View {
+        if isSyncing {
+            ProgressView()
+                .controlSize(.small)
+                .help("Syncing…")
+        } else if let syncErrorMessage {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .help(syncErrorMessage)
+        }
+    }
+
+    private var syncErrorMessage: String? {
+        tasksManager.errorMessage ?? calendarManager.errorMessage ?? fathomManager.accountErrors.values.first
     }
 
     /// A plain (non-DisclosureGroup) collapsible section header: a button
@@ -224,6 +247,8 @@ struct ContentView: View {
 
 
     private func refresh() async {
+        isSyncing = true
+        defer { isSyncing = false }
         lateCheckAnchor = Date()
         let syncOutcome = await tasksManager.sync(context: modelContext)
 
