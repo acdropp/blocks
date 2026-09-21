@@ -3,6 +3,7 @@ import Foundation
 struct GoogleCalendarEvent: Codable {
     let id: String
     let status: String?
+    let summary: String?
     let start: EventDateTimeResponse?
     let end: EventDateTimeResponse?
 
@@ -111,6 +112,7 @@ struct GoogleCalendarService: Sendable {
             print("[Calendar] Event \(eventID) is cancelled")
             return nil
         }
+        print("[Calendar] Fetched event \(eventID), summary: \"\(event.summary ?? "nil")\"")
         return event
     }
 
@@ -155,7 +157,7 @@ struct GoogleCalendarService: Sendable {
         try Self.checkResponse(response, data: data, context: "update event")
 
         let event = try JSONDecoder().decode(GoogleCalendarEvent.self, from: data)
-        print("[Calendar] Updated event \(event.id)")
+        print("[Calendar] Updated event \(event.id), Google now reports summary: \"\(event.summary ?? "nil")\"")
         return event
     }
 

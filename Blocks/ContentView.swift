@@ -188,7 +188,14 @@ struct ContentView: View {
 
     private func refresh() async {
         lateCheckAnchor = Date()
-        await tasksManager.sync(context: modelContext)
+        let syncOutcome = await tasksManager.sync(context: modelContext)
+
+        for item in syncOutcome.completionChanged {
+            await calendarManager.updateEventCompletionMark(for: item, listName: listName(for: item))
+        }
+        for ref in syncOutcome.deletedEventRefs {
+            await calendarManager.deleteBlock(calendarID: ref.calendarID, eventID: ref.eventID)
+        }
 
         let calendarChanges = await calendarManager.pullChanges(context: modelContext)
         for item in calendarChanges.updated {
@@ -196,9 +203,16 @@ struct ContentView: View {
         }
         for item in calendarChanges.cleared {
             await tasksManager.clearDueDate(item)
+            if let optOutListID = tasksManager.optOutListID {
+                moveToGoogleList(item, to: optOutListID)
+            }
         }
 
         await fathomManager.fetchNewActionItems(context: modelContext)
+    }
+
+    private func listName(for item: TodoItem) -> String? {
+        tasksManager.taskLists.first(where: { $0.id == item.googleListID })?.title
     }
 
     @ViewBuilder
@@ -403,7 +417,11 @@ struct ContentView: View {
         item.isCompleted = true
         item.lastModified = Date()
         print("[Tasks] Completed via context menu for \"\(item.title)\": task=\(item.googleTaskID ?? "nil") list=\(item.googleListID ?? "nil")")
-        Task { await tasksManager.pushUpdate(item) }
+        let name = listName(for: item)
+        Task {
+            await tasksManager.pushUpdate(item)
+            await calendarManager.updateEventCompletionMark(for: item, listName: name)
+        }
     }
 
     private func moveSelected(to section: TodoSection) {
@@ -706,7 +724,11 @@ private struct TodoRow: View {
                     item.isCompleted = newValue
                     item.lastModified = Date()
                     print("[Tasks] Toggled completion for \"\(item.title)\": task=\(item.googleTaskID ?? "nil") list=\(item.googleListID ?? "nil") completed=\(newValue)")
-                    Task { await tasksManager.pushUpdate(item) }
+                    let name = tasksManager.taskLists.first(where: { $0.id == item.googleListID })?.title
+                    Task {
+                        await tasksManager.pushUpdate(item)
+                        await calendarManager.updateEventCompletionMark(for: item, listName: name)
+                    }
                 }
             ))
                 .labelsHidden()

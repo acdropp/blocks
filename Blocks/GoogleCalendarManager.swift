@@ -104,13 +104,13 @@ final class GoogleCalendarManager: ObservableObject {
             let event: GoogleCalendarEvent
             if let eventID = item.calendarEventID {
                 let calendarID = item.calendarID ?? "primary"
-                event = try await service.updateEvent(calendarID: calendarID, eventID: eventID, title: item.title, start: startTime, end: endTime, description: listName, accessToken: token)
+                event = try await service.updateEvent(calendarID: calendarID, eventID: eventID, title: Self.eventTitle(for: item), start: startTime, end: endTime, description: listName, accessToken: token)
             } else {
                 guard let calendarID = await ensureBlocksCalendar() else {
                     errorMessage = "Couldn't set up the Blocks calendar."
                     return false
                 }
-                event = try await service.insertEvent(calendarID: calendarID, title: item.title, start: startTime, end: endTime, description: listName, blocksTaskID: item.blocksTaskID!, accessToken: token)
+                event = try await service.insertEvent(calendarID: calendarID, title: Self.eventTitle(for: item), start: startTime, end: endTime, description: listName, blocksTaskID: item.blocksTaskID!, accessToken: token)
                 item.calendarID = calendarID
             }
             item.calendarEventID = event.id
@@ -189,6 +189,33 @@ final class GoogleCalendarManager: ObservableObject {
         return CalendarPullOutcome(updated: updated, cleared: cleared)
     }
 
+    /// The calendar event title for a task: "✓ <title>" when complete,
+    /// plain <title> otherwise. Always computed fresh from the task's own
+    /// title and completion state — never by editing whatever string is
+    /// already on the event — so it can never end up with two checkmarks.
+    private static func eventTitle(for item: TodoItem) -> String {
+        item.isCompleted ? "✓ \(item.title)" : item.title
+    }
+
+    /// Renames the task's calendar event to reflect its current completion
+    /// state (adds/removes the "✓ " prefix). No-op if the task has no
+    /// block. Safe to call any time completion changes, from either side.
+    func updateEventCompletionMark(for item: TodoItem, listName: String?) async {
+        guard let eventID = item.calendarEventID, let dueDate = item.dueDate, let duration = item.blockDurationSeconds else { return }
+        let calendarID = item.calendarID ?? "primary"
+        let title = Self.eventTitle(for: item)
+        print("[Calendar] Updating completion mark for \"\(item.title)\": \(item.isCompleted ? "checked" : "unchecked")")
+        do {
+            let token = try await authManager.validAccessToken()
+            let endTime = dueDate.addingTimeInterval(duration)
+            _ = try await service.updateEvent(calendarID: calendarID, eventID: eventID, title: title, start: dueDate, end: endTime, description: listName, accessToken: token)
+            errorMessage = nil
+        } catch {
+            print("[Calendar] Failed to update completion mark for \"\(item.title)\": \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func deleteBlock(calendarID: String?, eventID: String) async {
         print("[Calendar] Deleting event \(eventID)")
         do {
@@ -224,7 +251,7 @@ final class GoogleCalendarManager: ObservableObject {
                 do {
                     let newEvent = try await service.insertEvent(
                         calendarID: calendarID,
-                        title: item.title,
+                        title: Self.eventTitle(for: item),
                         start: dueDate,
                         end: endTime,
                         description: listName,

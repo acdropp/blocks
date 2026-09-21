@@ -2,6 +2,16 @@ import Foundation
 import Combine
 import SwiftData
 
+struct DeletedTaskCalendarRef {
+    let eventID: String
+    let calendarID: String?
+}
+
+struct TaskSyncOutcome {
+    let completionChanged: [TodoItem]
+    let deletedEventRefs: [DeletedTaskCalendarRef]
+}
+
 @MainActor
 final class GoogleTasksManager: ObservableObject {
     private static let defaultTaskListIDKey = "selectedGoogleTaskListID"
@@ -102,13 +112,16 @@ final class GoogleTasksManager: ObservableObject {
         }
     }
 
-    func sync(context: ModelContext) async {
+    func sync(context: ModelContext) async -> TaskSyncOutcome {
         guard !isSyncing else {
             print("[Tasks] Sync already in progress, skipping")
-            return
+            return TaskSyncOutcome(completionChanged: [], deletedEventRefs: [])
         }
         isSyncing = true
         defer { isSyncing = false }
+
+        var completionChanged: [TodoItem] = []
+        var deletedEventRefs: [DeletedTaskCalendarRef] = []
 
         print("[Tasks] Syncing all task lists")
         do {
@@ -150,6 +163,9 @@ final class GoogleTasksManager: ObservableObject {
                         existing.googleListID = list.id
                         let localModified = existing.lastModified ?? .distantPast
                         guard remoteUpdated > localModified else { continue }
+                        if existing.isCompleted != remote.isCompleted {
+                            completionChanged.append(existing)
+                        }
                         existing.title = remote.title ?? ""
                         existing.isCompleted = remote.isCompleted
                         // Google Tasks only stores a date, not a time. A task
@@ -187,6 +203,9 @@ final class GoogleTasksManager: ObservableObject {
                 let listGone = !validListIDs.contains(listID)
                 let taskGone = !listGone && item.googleTaskID != nil && !seenTaskIDs.contains(item.googleTaskID!)
                 guard listGone || taskGone else { continue }
+                if let eventID = item.calendarEventID {
+                    deletedEventRefs.append(DeletedTaskCalendarRef(eventID: eventID, calendarID: item.calendarID))
+                }
                 context.delete(item)
                 removedCount += 1
             }
@@ -197,6 +216,7 @@ final class GoogleTasksManager: ObservableObject {
             print("[Tasks] Sync failed: \(error.localizedDescription)")
             errorMessage = error.localizedDescription
         }
+        return TaskSyncOutcome(completionChanged: completionChanged, deletedEventRefs: deletedEventRefs)
     }
 
     func pushNewTask(_ item: TodoItem) async {
