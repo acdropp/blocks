@@ -22,6 +22,11 @@ struct ContentView: View {
     @State private var isOtherToDosExpanded = true
     @State private var isCompletedExpanded = false
     @AppStorage("isPersonalExpanded") private var isPersonalExpanded = false
+    @AppStorage("isTopPrioritiesSectionHidden") private var isTopPrioritiesSectionHidden = false
+    @AppStorage("isWorkPrioritiesSectionHidden") private var isWorkPrioritiesSectionHidden = false
+    @AppStorage("isChoresSectionHidden") private var isChoresSectionHidden = false
+    @AppStorage("isOtherToDosSectionHidden") private var isOtherToDosSectionHidden = false
+    @AppStorage("isCompletedSectionHidden") private var isCompletedSectionHidden = false
     @State private var selection: PersistentIdentifier?
     @State private var editingItemID: PersistentIdentifier?
 
@@ -63,44 +68,54 @@ struct ContentView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
 
-                DisclosureGroup(isExpanded: $isTopPrioritiesExpanded) {
-                    ForEach(topPriorities) { item in
-                        row(for: item)
+                if !isTopPrioritiesSectionHidden {
+                    DisclosureGroup(isExpanded: $isTopPrioritiesExpanded) {
+                        ForEach(topPriorities) { item in
+                            row(for: item)
+                        }
+                    } label: {
+                        sectionLabel("TOP PRIORITIES")
                     }
-                } label: {
-                    sectionLabel("TOP PRIORITIES")
                 }
 
-                DisclosureGroup(isExpanded: $isWorkPrioritiesExpanded) {
-                    ForEach(workPriorities) { item in
-                        row(for: item)
+                if !isWorkPrioritiesSectionHidden {
+                    DisclosureGroup(isExpanded: $isWorkPrioritiesExpanded) {
+                        ForEach(workPriorities) { item in
+                            row(for: item)
+                        }
+                    } label: {
+                        sectionLabel("WORK PRIORITIES")
                     }
-                } label: {
-                    sectionLabel("WORK PRIORITIES")
                 }
 
-                DisclosureGroup(isExpanded: $isChoresExpanded) {
-                    ForEach(chores) { item in
-                        row(for: item)
+                if !isChoresSectionHidden {
+                    DisclosureGroup(isExpanded: $isChoresExpanded) {
+                        ForEach(chores) { item in
+                            row(for: item)
+                        }
+                    } label: {
+                        sectionLabel("CHORES")
                     }
-                } label: {
-                    sectionLabel("CHORES")
                 }
 
-                DisclosureGroup(isExpanded: $isOtherToDosExpanded) {
-                    ForEach(otherToDos) { item in
-                        row(for: item)
+                if !isOtherToDosSectionHidden {
+                    DisclosureGroup(isExpanded: $isOtherToDosExpanded) {
+                        ForEach(otherToDos) { item in
+                            row(for: item)
+                        }
+                    } label: {
+                        sectionLabel("OTHER TO-DOS")
                     }
-                } label: {
-                    sectionLabel("OTHER TO-DOS")
                 }
 
-                DisclosureGroup(isExpanded: $isCompletedExpanded) {
-                    ForEach(completed) { item in
-                        row(for: item)
+                if !isCompletedSectionHidden {
+                    DisclosureGroup(isExpanded: $isCompletedExpanded) {
+                        ForEach(completed) { item in
+                            row(for: item)
+                        }
+                    } label: {
+                        sectionLabel("COMPLETED")
                     }
-                } label: {
-                    sectionLabel("COMPLETED")
                 }
 
                 if tasksManager.isPersonalSectionVisible, tasksManager.personalListID != nil {
@@ -528,7 +543,12 @@ struct ContentView: View {
     // MARK: - Find
 
     private var orderedItems: [TodoItem] {
-        var all = topPriorities + workPriorities + chores + otherToDos + completed
+        var all: [TodoItem] = []
+        if !isTopPrioritiesSectionHidden { all += topPriorities }
+        if !isWorkPrioritiesSectionHidden { all += workPriorities }
+        if !isChoresSectionHidden { all += chores }
+        if !isOtherToDosSectionHidden { all += otherToDos }
+        if !isCompletedSectionHidden { all += completed }
         if tasksManager.isPersonalSectionVisible {
             all += personalItems
         }

@@ -17,6 +17,12 @@ struct SettingsView: View {
     @State private var isMigratingBlocks = false
     @State private var migrationResultMessage: String?
 
+    @AppStorage("isTopPrioritiesSectionHidden") private var isTopPrioritiesSectionHidden = false
+    @AppStorage("isWorkPrioritiesSectionHidden") private var isWorkPrioritiesSectionHidden = false
+    @AppStorage("isChoresSectionHidden") private var isChoresSectionHidden = false
+    @AppStorage("isOtherToDosSectionHidden") private var isOtherToDosSectionHidden = false
+    @AppStorage("isCompletedSectionHidden") private var isCompletedSectionHidden = false
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -99,13 +105,11 @@ struct SettingsView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
-
-                    Toggle("Hide Personal Section", isOn: Binding(
-                        get: { !tasksManager.isPersonalSectionVisible },
-                        set: { tasksManager.isPersonalSectionVisible = !$0 }
-                    ))
-                        .toggleStyle(.checkbox)
                 }
+
+                Divider()
+
+                sectionVisibilitySection
 
                 Divider()
 
@@ -129,6 +133,31 @@ struct SettingsView: View {
             Divider()
 
             loginItemSection
+        }
+    }
+
+    @ViewBuilder
+    private var sectionVisibilitySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Sections")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Toggle("Hide Top Priorities", isOn: $isTopPrioritiesSectionHidden)
+                .toggleStyle(.checkbox)
+            Toggle("Hide Work Priorities", isOn: $isWorkPrioritiesSectionHidden)
+                .toggleStyle(.checkbox)
+            Toggle("Hide Chores", isOn: $isChoresSectionHidden)
+                .toggleStyle(.checkbox)
+            Toggle("Hide Other To-dos", isOn: $isOtherToDosSectionHidden)
+                .toggleStyle(.checkbox)
+            Toggle("Hide Completed", isOn: $isCompletedSectionHidden)
+                .toggleStyle(.checkbox)
+            Toggle("Hide Personal Section", isOn: Binding(
+                get: { !tasksManager.isPersonalSectionVisible },
+                set: { tasksManager.isPersonalSectionVisible = !$0 }
+            ))
+                .toggleStyle(.checkbox)
         }
     }
 
