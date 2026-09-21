@@ -216,15 +216,38 @@ final class GoogleCalendarManager: ObservableObject {
         }
     }
 
+    /// Deletes a calendar event, retrying a couple of times on HTTP 412
+    /// (conditionNotMet). Google Calendar returns that intermittently when
+    /// a calendar gets rapid back-to-back writes (e.g. quickly removing and
+    /// rescheduling a block several times in a row) — it's usually transient.
+    /// Retrying here matters: once this returns, the caller forgets the
+    /// event's ID, so a failure that isn't retried leaves the event
+    /// orphaned on Google Calendar forever with no way to clean it up later.
     func deleteBlock(calendarID: String?, eventID: String) async {
         print("[Calendar] Deleting event \(eventID)")
-        do {
-            let token = try await authManager.validAccessToken()
-            try await service.deleteEvent(calendarID: calendarID ?? "primary", eventID: eventID, accessToken: token)
-            errorMessage = nil
-        } catch {
-            print("[Calendar] Failed to delete event \(eventID): \(error.localizedDescription)")
-            errorMessage = error.localizedDescription
+        let resolvedCalendarID = calendarID ?? "primary"
+        var attempt = 1
+        while true {
+            do {
+                let token = try await authManager.validAccessToken()
+                try await service.deleteEvent(calendarID: resolvedCalendarID, eventID: eventID, accessToken: token)
+                errorMessage = nil
+                return
+            } catch let error as GoogleCalendarError {
+                if case .requestFailed(let status, _) = error, status == 412, attempt < 3 {
+                    print("[Calendar] Delete of \(eventID) hit a transient conflict (HTTP 412) — retrying (attempt \(attempt + 1))")
+                    attempt += 1
+                    try? await Task.sleep(nanoseconds: 750_000_000)
+                    continue
+                }
+                print("[Calendar] Failed to delete event \(eventID): \(error.localizedDescription)")
+                errorMessage = error.localizedDescription
+                return
+            } catch {
+                print("[Calendar] Failed to delete event \(eventID): \(error.localizedDescription)")
+                errorMessage = error.localizedDescription
+                return
+            }
         }
     }
 
