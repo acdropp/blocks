@@ -53,15 +53,14 @@ struct ContentView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
 
-                DisclosureGroup(isExpanded: $isFromMeetingsExpanded) {
+                sectionHeaderRow("FROM MEETINGS", isExpanded: $isFromMeetingsExpanded)
+                if isFromMeetingsExpanded {
                     Divider()
                         .listRowInsets(EdgeInsets())
                         .listRowSeparator(.hidden)
                     ForEach(inboxItems) { item in
                         inboxRow(for: item)
                     }
-                } label: {
-                    sectionLabel("FROM MEETINGS")
                 }
 
                 SortHeaderRow(sortColumn: $sortColumn, sortDirection: $sortDirection)
@@ -69,62 +68,56 @@ struct ContentView: View {
                     .listRowSeparator(.hidden)
 
                 if !isTopPrioritiesSectionHidden {
-                    DisclosureGroup(isExpanded: $isTopPrioritiesExpanded) {
+                    sectionHeaderRow("TOP PRIORITIES", isExpanded: $isTopPrioritiesExpanded)
+                    if isTopPrioritiesExpanded {
                         ForEach(topPriorities) { item in
                             row(for: item)
                         }
-                    } label: {
-                        sectionLabel("TOP PRIORITIES")
                     }
                 }
 
                 if !isWorkPrioritiesSectionHidden {
-                    DisclosureGroup(isExpanded: $isWorkPrioritiesExpanded) {
+                    sectionHeaderRow("WORK PRIORITIES", isExpanded: $isWorkPrioritiesExpanded)
+                    if isWorkPrioritiesExpanded {
                         ForEach(workPriorities) { item in
                             row(for: item)
                         }
-                    } label: {
-                        sectionLabel("WORK PRIORITIES")
                     }
                 }
 
                 if !isChoresSectionHidden {
-                    DisclosureGroup(isExpanded: $isChoresExpanded) {
+                    sectionHeaderRow("CHORES", isExpanded: $isChoresExpanded)
+                    if isChoresExpanded {
                         ForEach(chores) { item in
                             row(for: item)
                         }
-                    } label: {
-                        sectionLabel("CHORES")
                     }
                 }
 
                 if !isOtherToDosSectionHidden {
-                    DisclosureGroup(isExpanded: $isOtherToDosExpanded) {
+                    sectionHeaderRow("OTHER TO-DOS", isExpanded: $isOtherToDosExpanded)
+                    if isOtherToDosExpanded {
                         ForEach(otherToDos) { item in
                             row(for: item)
                         }
-                    } label: {
-                        sectionLabel("OTHER TO-DOS")
                     }
                 }
 
                 if !isCompletedSectionHidden {
-                    DisclosureGroup(isExpanded: $isCompletedExpanded) {
+                    sectionHeaderRow("COMPLETED", isExpanded: $isCompletedExpanded)
+                    if isCompletedExpanded {
                         ForEach(completed) { item in
                             row(for: item)
                         }
-                    } label: {
-                        sectionLabel("COMPLETED")
                     }
                 }
 
                 if tasksManager.isPersonalSectionVisible, tasksManager.personalListID != nil {
-                    DisclosureGroup(isExpanded: $isPersonalExpanded) {
+                    sectionHeaderRow("PERSONAL", isExpanded: $isPersonalExpanded)
+                    if isPersonalExpanded {
                         ForEach(personalItems) { item in
                             row(for: item)
                         }
-                    } label: {
-                        sectionLabel("PERSONAL")
                     }
                 }
             }
@@ -171,12 +164,31 @@ struct ContentView: View {
         }
     }
 
-    private func sectionLabel(_ title: String) -> some View {
-        HStack(spacing: 0) {
-            Color.clear.frame(width: RowLayout.sectionLabelIndent, height: 1)
-            Text(title)
-                .font(.headline)
+    /// A plain (non-DisclosureGroup) collapsible section header: a button
+    /// with our own chevron, positioned to line up with row checkboxes.
+    /// Kept out of DisclosureGroup entirely — wrapping ForEach content
+    /// inside a DisclosureGroupStyle's own container view was found to
+    /// strip the List's native row separators and default row height from
+    /// each child row. Sibling rows below (in an `if isExpanded { ForEach }`
+    /// right after this) stay genuine top-level List rows instead.
+    private func sectionHeaderRow(_ title: String, isExpanded: Binding<Bool>) -> some View {
+        Button {
+            withAnimation {
+                isExpanded.wrappedValue.toggle()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                    .frame(width: RowLayout.leadingSpacerWidth, height: 20, alignment: .center)
+                Text(title)
+                    .font(.headline)
+                Spacer()
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -656,10 +668,6 @@ private enum RowLayout {
     static let leadingSpacerWidth: CGFloat = 18
     static let dueColumnWidth: CGFloat = 150
     static let listColumnWidth: CGFloat = 90
-    // DisclosureGroup reserves extra leading space for its own triangle
-    // that a plain row (checkbox + title) doesn't have, so its label needs
-    // a bigger push than leadingSpacerWidth to line up with row text below it.
-    static let sectionLabelIndent: CGFloat = 34
     // Rows nested inside a DisclosureGroup's content (like inbox rows under
     // FROM MEETINGS) sit further right than the DisclosureGroup's own label
     // by AppKit's built-in outline indent; this offsets that so inbox row
@@ -695,7 +703,6 @@ private struct SortHeaderRow: View {
         }
         .font(.caption)
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 20)
         .padding(.vertical, 6)
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -706,11 +713,11 @@ private struct SortHeaderRow: View {
             toggle(column)
         } label: {
             HStack(spacing: 2) {
-                Text(title)
                 if sortColumn == column {
                     Image(systemName: sortDirection == .ascending ? "chevron.up" : "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
                 }
+                Text(title)
             }
         }
         .buttonStyle(.plain)
