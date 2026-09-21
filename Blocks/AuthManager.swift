@@ -7,6 +7,11 @@ final class AuthManager: ObservableObject {
     static let scopes = [
         "https://www.googleapis.com/auth/tasks",
         "https://www.googleapis.com/auth/calendar.events",
+        // Lets Blocks create/manage its own secondary "Blocks" calendar,
+        // without broader access to the rest of the user's calendars.
+        // Requires this scope to be added in Google Cloud Console's OAuth
+        // consent screen, and a fresh sign-in to actually grant it.
+        "https://www.googleapis.com/auth/calendar.app.created",
     ]
 
     @Published private(set) var email: String?
@@ -22,6 +27,7 @@ final class AuthManager: ObservableObject {
                     return
                 }
                 print("[Auth] Restore succeeded: \(user?.profile?.email ?? "no email")")
+                print("[Auth] Granted scopes: \(user?.grantedScopes ?? [])")
                 self?.email = user?.profile?.email
                 continuation.resume()
             }
@@ -47,13 +53,22 @@ final class AuthManager: ObservableObject {
                 return
             }
             print("[Auth] Sign-in succeeded: \(result?.user.profile?.email ?? "no email")")
+            print("[Auth] Granted scopes: \(result?.user.grantedScopes ?? [])")
             self?.email = result?.user.profile?.email
         }
     }
 
     func signOut() {
         print("[Auth] Signing out")
-        GIDSignIn.sharedInstance.signOut()
+        // disconnect (not signOut) actually revokes the grant server-side,
+        // not just the local session — needed so a later sign-in does a
+        // genuinely fresh OAuth flow instead of possibly reusing a stale
+        // locally-cached scope set.
+        GIDSignIn.sharedInstance.disconnect { error in
+            if let error {
+                print("[Auth] Disconnect failed: \(error.localizedDescription)")
+            }
+        }
         email = nil
         errorMessage = nil
     }

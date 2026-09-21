@@ -416,12 +416,13 @@ struct ContentView: View {
         let taskID = item.googleTaskID
         let listID = item.googleListID
         let eventID = item.calendarEventID
+        let calendarID = item.calendarID
         modelContext.delete(item)
         if let taskID, let listID {
             Task { await tasksManager.pushDelete(taskID: taskID, listID: listID) }
         }
         if let eventID {
-            Task { await calendarManager.deleteBlock(eventID: eventID) }
+            Task { await calendarManager.deleteBlock(calendarID: calendarID, eventID: eventID) }
         }
     }
 
@@ -812,8 +813,9 @@ private struct TodoRow: View {
 
     private func confirmBlock(duration: TimeInterval) {
         let startTime = pendingStartTime
+        let listName = tasksManager.taskLists.first(where: { $0.id == item.googleListID })?.title
         Task {
-            let success = await calendarManager.scheduleBlock(for: item, duration: duration, startTime: startTime)
+            let success = await calendarManager.scheduleBlock(for: item, duration: duration, startTime: startTime, listName: listName)
             if success {
                 await tasksManager.pushUpdate(item)
                 moveToList(id: tasksManager.scheduledListID, settingName: "Scheduled list")
@@ -823,13 +825,15 @@ private struct TodoRow: View {
 
     private func removeBlock() {
         guard let eventID = item.calendarEventID else { return }
+        let calendarID = item.calendarID
         let wasInScheduled = isInList(id: tasksManager.scheduledListID)
         item.calendarEventID = nil
+        item.calendarID = nil
         item.dueDate = nil
         item.blockDurationSeconds = nil
         item.lastModified = Date()
         Task {
-            await calendarManager.deleteBlock(eventID: eventID)
+            await calendarManager.deleteBlock(calendarID: calendarID, eventID: eventID)
             await tasksManager.clearDueDate(item)
         }
         if wasInScheduled {

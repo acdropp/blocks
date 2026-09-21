@@ -98,7 +98,9 @@ extension Notification.Name {
             SettingsView()
                 .environmentObject(authManager)
                 .environmentObject(tasksManager)
+                .environmentObject(calendarManager)
                 .environmentObject(fathomManager)
         }
+        .modelContainer(container)
     }
 }

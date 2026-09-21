@@ -15,6 +15,15 @@ struct EventDateTimeResponse: Codable {
     let date: String?
 }
 
+struct GoogleCalendarListEntry: Codable, Identifiable {
+    let id: String
+    let summary: String
+}
+
+private struct InsertCalendarBody: Encodable {
+    let summary: String
+}
+
 enum GoogleCalendarError: LocalizedError {
     case requestFailed(status: Int, body: String)
 
@@ -37,6 +46,7 @@ private struct ExtendedProperties: Encodable {
 
 private struct InsertEventBody: Encodable {
     let summary: String
+    let description: String?
     let start: EventDateTime
     let end: EventDateTime
     let extendedProperties: ExtendedProperties
@@ -44,18 +54,46 @@ private struct InsertEventBody: Encodable {
 
 private struct UpdateEventBody: Encodable {
     let summary: String
+    let description: String?
     let start: EventDateTime
     let end: EventDateTime
 }
 
 struct GoogleCalendarService: Sendable {
-    private let baseURL = URL(string: "https://www.googleapis.com/calendar/v3/calendars/primary/events")!
+    private static let calendarsBase = "https://www.googleapis.com/calendar/v3/calendars"
+
+    private func eventsURL(calendarID: String) -> URL {
+        URL(string: "\(Self.calendarsBase)/\(Self.encode(calendarID))/events")!
+    }
+
+    private static func encode(_ calendarID: String) -> String {
+        calendarID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? calendarID
+    }
+
+    /// Creates a new secondary calendar. Requires the calendar.app.created
+    /// (or full calendar) scope.
+    func insertCalendar(summary: String, accessToken: String) async throws -> GoogleCalendarListEntry {
+        let url = URL(string: Self.calendarsBase)!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(InsertCalendarBody(summary: summary))
+
+        print("[Calendar] POST \(url.absoluteString) (creating calendar \"\(summary)\")")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try Self.checkResponse(response, data: data, context: "create calendar")
+
+        let created = try JSONDecoder().decode(GoogleCalendarListEntry.self, from: data)
+        print("[Calendar] Created calendar \"\(summary)\": \(created.id)")
+        return created
+    }
 
     /// Fetches a single event by ID. Returns nil if the event was deleted
     /// (HTTP 404/410, or a "cancelled" status still visible for a while
     /// after deletion).
-    func fetchEvent(eventID: String, accessToken: String) async throws -> GoogleCalendarEvent? {
-        let url = baseURL.appendingPathComponent(eventID)
+    func fetchEvent(calendarID: String, eventID: String, accessToken: String) async throws -> GoogleCalendarEvent? {
+        let url = eventsURL(calendarID: calendarID).appendingPathComponent(eventID)
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
@@ -76,19 +114,21 @@ struct GoogleCalendarService: Sendable {
         return event
     }
 
-    func insertEvent(title: String, start: Date, end: Date, blocksTaskID: String, accessToken: String) async throws -> GoogleCalendarEvent {
-        var request = URLRequest(url: baseURL)
+    func insertEvent(calendarID: String, title: String, start: Date, end: Date, description: String?, blocksTaskID: String, accessToken: String) async throws -> GoogleCalendarEvent {
+        let url = eventsURL(calendarID: calendarID)
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(InsertEventBody(
             summary: title,
+            description: description,
             start: Self.eventDateTime(start),
             end: Self.eventDateTime(end),
             extendedProperties: ExtendedProperties(private: ["blocksTaskID": blocksTaskID])
         ))
 
-        print("[Calendar] POST \(baseURL.absoluteString)")
+        print("[Calendar] POST \(url.absoluteString)")
         let (data, response) = try await URLSession.shared.data(for: request)
         try Self.checkResponse(response, data: data, context: "insert event")
 
@@ -97,14 +137,15 @@ struct GoogleCalendarService: Sendable {
         return event
     }
 
-    func updateEvent(eventID: String, title: String, start: Date, end: Date, accessToken: String) async throws -> GoogleCalendarEvent {
-        let url = baseURL.appendingPathComponent(eventID)
+    func updateEvent(calendarID: String, eventID: String, title: String, start: Date, end: Date, description: String?, accessToken: String) async throws -> GoogleCalendarEvent {
+        let url = eventsURL(calendarID: calendarID).appendingPathComponent(eventID)
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(UpdateEventBody(
             summary: title,
+            description: description,
             start: Self.eventDateTime(start),
             end: Self.eventDateTime(end)
         ))
@@ -118,8 +159,8 @@ struct GoogleCalendarService: Sendable {
         return event
     }
 
-    func deleteEvent(eventID: String, accessToken: String) async throws {
-        let url = baseURL.appendingPathComponent(eventID)
+    func deleteEvent(calendarID: String, eventID: String, accessToken: String) async throws {
+        let url = eventsURL(calendarID: calendarID).appendingPathComponent(eventID)
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")

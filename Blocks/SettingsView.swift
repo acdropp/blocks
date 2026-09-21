@@ -1,14 +1,21 @@
 import SwiftUI
+import SwiftData
 import AppKit
 
 struct SettingsView: View {
+    @Environment(\.modelContext) private var modelContext
     @EnvironmentObject private var authManager: AuthManager
     @EnvironmentObject private var tasksManager: GoogleTasksManager
+    @EnvironmentObject private var calendarManager: GoogleCalendarManager
     @EnvironmentObject private var fathomManager: FathomManager
     @StateObject private var loginItemManager = LoginItemManager()
+    @Query(filter: #Predicate<TodoItem> { $0.calendarEventID != nil && $0.calendarID == nil })
+    private var legacyPrimaryBlocks: [TodoItem]
 
     @State private var newAccountName = ""
     @State private var newAccountKey = ""
+    @State private var isMigratingBlocks = false
+    @State private var migrationResultMessage: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,7 +33,7 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.vertical, 12)
         }
-        .frame(width: 340, height: 560)
+        .frame(width: 340, height: 620)
     }
 
     @ViewBuilder
@@ -99,6 +106,10 @@ struct SettingsView: View {
                     ))
                         .toggleStyle(.checkbox)
                 }
+
+                Divider()
+
+                calendarSection
             } else {
                 Button("Sign in with Google") {
                     authManager.signIn()
@@ -118,6 +129,65 @@ struct SettingsView: View {
             Divider()
 
             loginItemSection
+        }
+    }
+
+    @ViewBuilder
+    private var calendarSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Time blocks")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Text("Blocks calendar")
+                Spacer()
+                Text(calendarManager.calendars.first(where: { $0.id == calendarManager.blocksCalendarID })?.summary ?? "Not set yet")
+                    .foregroundStyle(.secondary)
+            }
+
+            if calendarManager.blocksCalendarID == nil {
+                Text("Created automatically the first time you schedule a task.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if let error = calendarManager.errorMessage {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+
+            if !legacyPrimaryBlocks.isEmpty {
+                Text("\(legacyPrimaryBlocks.count) time block(s) are still on your primary calendar.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Button(isMigratingBlocks ? "Moving…" : "Move to Blocks Calendar") {
+                    migrateLegacyBlocks()
+                }
+                .disabled(isMigratingBlocks)
+            }
+
+            if let migrationResultMessage {
+                Text(migrationResultMessage)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func migrateLegacyBlocks() {
+        let listNamesByID = Dictionary(uniqueKeysWithValues: tasksManager.taskLists.map { ($0.id, $0.title) })
+        let items = legacyPrimaryBlocks
+        isMigratingBlocks = true
+        migrationResultMessage = nil
+        Task {
+            let outcome = await calendarManager.migrateLegacyBlocksToBlocksCalendar(items: items, listNamesByID: listNamesByID)
+            isMigratingBlocks = false
+            migrationResultMessage = outcome.failed == 0
+                ? "Moved \(outcome.moved) time block(s)."
+                : "Moved \(outcome.moved), failed to move \(outcome.failed)."
         }
     }
 

@@ -19,6 +19,9 @@ final class TodoItem {
     var lastModified: Date?
     var blocksTaskID: String?
     var calendarEventID: String?
+    // Which calendar calendarEventID lives on. nil means "primary" — every
+    // block created before the Blocks calendar existed has no value here.
+    var calendarID: String?
     var blockDurationSeconds: Double?
     var manualOrder: Double?
 
@@ -33,6 +36,7 @@ final class TodoItem {
         self.lastModified = nil
         self.blocksTaskID = nil
         self.calendarEventID = nil
+        self.calendarID = nil
         self.blockDurationSeconds = nil
         self.manualOrder = nil
     }

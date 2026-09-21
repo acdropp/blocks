@@ -7,6 +7,11 @@ struct CalendarPullOutcome {
     let cleared: [TodoItem]
 }
 
+struct LegacyBlockMigrationOutcome {
+    let moved: Int
+    let failed: Int
+}
+
 private enum CalendarEventFetchResult {
     case found(GoogleCalendarEvent)
     case deleted
@@ -16,19 +21,19 @@ private enum CalendarEventFetchResult {
 /// Fetches the given events concurrently rather than one at a time. Takes
 /// `service` and `accessToken` as plain values (not `self`) so each fetch
 /// can run off the main actor without capturing MainActor-isolated state.
-private func fetchCalendarEvents(eventIDs: [String], accessToken: String, service: GoogleCalendarService) async -> [String: CalendarEventFetchResult] {
+private func fetchCalendarEvents(requests: [(eventID: String, calendarID: String)], accessToken: String, service: GoogleCalendarService) async -> [String: CalendarEventFetchResult] {
     await withTaskGroup(of: (String, CalendarEventFetchResult).self) { group in
-        for eventID in eventIDs {
+        for request in requests {
             group.addTask {
                 do {
-                    if let event = try await service.fetchEvent(eventID: eventID, accessToken: accessToken) {
-                        return (eventID, .found(event))
+                    if let event = try await service.fetchEvent(calendarID: request.calendarID, eventID: request.eventID, accessToken: accessToken) {
+                        return (request.eventID, .found(event))
                     } else {
-                        return (eventID, .deleted)
+                        return (request.eventID, .deleted)
                     }
                 } catch {
-                    print("[Calendar] Failed to fetch event \(eventID): \(error.localizedDescription)")
-                    return (eventID, .failed)
+                    print("[Calendar] Failed to fetch event \(request.eventID): \(error.localizedDescription)")
+                    return (request.eventID, .failed)
                 }
             }
         }
@@ -42,19 +47,52 @@ private func fetchCalendarEvents(eventIDs: [String], accessToken: String, servic
 
 @MainActor
 final class GoogleCalendarManager: ObservableObject {
+    private static let blocksCalendarIDKey = "blocksCalendarID"
+    static let blocksCalendarName = "Blocks"
+
     @Published private(set) var errorMessage: String?
+    @Published private(set) var calendars: [GoogleCalendarListEntry] = []
+    @Published var blocksCalendarID: String? {
+        didSet {
+            UserDefaults.standard.set(blocksCalendarID, forKey: Self.blocksCalendarIDKey)
+        }
+    }
 
     private let service = GoogleCalendarService()
     private let authManager: AuthManager
 
     init(authManager: AuthManager) {
         self.authManager = authManager
+        self.blocksCalendarID = UserDefaults.standard.string(forKey: Self.blocksCalendarIDKey)
+    }
+
+    /// Creates the "Blocks" calendar the first time it's needed and
+    /// remembers its ID locally from then on. Deliberately does NOT list
+    /// existing calendars first to check for one already named "Blocks" —
+    /// the calendar.app.created scope only covers creating/managing
+    /// calendars this app made, not listing the user's full calendar list
+    /// (that's a separate, broader scope), so listing would always fail.
+    func ensureBlocksCalendar() async -> String? {
+        if let blocksCalendarID { return blocksCalendarID }
+        do {
+            let token = try await authManager.validAccessToken()
+            let created = try await service.insertCalendar(summary: Self.blocksCalendarName, accessToken: token)
+            calendars.append(created)
+            blocksCalendarID = created.id
+            return created.id
+        } catch {
+            print("[Calendar] Failed to set up the \"\(Self.blocksCalendarName)\" calendar: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            return nil
+        }
     }
 
     /// Creates a new time block, or updates the task's existing one if it
-    /// already has a linked event. Returns true on success.
+    /// already has a linked event. New blocks go on the Blocks calendar
+    /// (created on first use); updates to an existing block stay on
+    /// whatever calendar it's already on. Returns true on success.
     @discardableResult
-    func scheduleBlock(for item: TodoItem, duration: TimeInterval, startTime: Date) async -> Bool {
+    func scheduleBlock(for item: TodoItem, duration: TimeInterval, startTime: Date, listName: String?) async -> Bool {
         if item.blocksTaskID == nil {
             item.blocksTaskID = UUID().uuidString
         }
@@ -65,16 +103,22 @@ final class GoogleCalendarManager: ObservableObject {
             let token = try await authManager.validAccessToken()
             let event: GoogleCalendarEvent
             if let eventID = item.calendarEventID {
-                event = try await service.updateEvent(eventID: eventID, title: item.title, start: startTime, end: endTime, accessToken: token)
+                let calendarID = item.calendarID ?? "primary"
+                event = try await service.updateEvent(calendarID: calendarID, eventID: eventID, title: item.title, start: startTime, end: endTime, description: listName, accessToken: token)
             } else {
-                event = try await service.insertEvent(title: item.title, start: startTime, end: endTime, blocksTaskID: item.blocksTaskID!, accessToken: token)
+                guard let calendarID = await ensureBlocksCalendar() else {
+                    errorMessage = "Couldn't set up the Blocks calendar."
+                    return false
+                }
+                event = try await service.insertEvent(calendarID: calendarID, title: item.title, start: startTime, end: endTime, description: listName, blocksTaskID: item.blocksTaskID!, accessToken: token)
+                item.calendarID = calendarID
             }
             item.calendarEventID = event.id
             item.dueDate = startTime
             item.blockDurationSeconds = duration
             item.lastModified = Date()
             errorMessage = nil
-            print("[Calendar] Block confirmed for \"\(item.title)\": event \(event.id)")
+            print("[Calendar] Block confirmed for \"\(item.title)\": event \(event.id) on calendar \(item.calendarID ?? "primary")")
             return true
         } catch {
             print("[Calendar] Failed to schedule block for \"\(item.title)\": \(error.localizedDescription)")
@@ -96,14 +140,17 @@ final class GoogleCalendarManager: ObservableObject {
             return CalendarPullOutcome(updated: [], cleared: [])
         }
 
-        let eventIDs = items.compactMap(\.calendarEventID)
-        print("[Calendar] Pulling changes for \(eventIDs.count) linked event(s)")
+        let requests = items.compactMap { item -> (eventID: String, calendarID: String)? in
+            guard let eventID = item.calendarEventID else { return nil }
+            return (eventID, item.calendarID ?? "primary")
+        }
+        print("[Calendar] Pulling changes for \(requests.count) linked event(s)")
 
         var updated: [TodoItem] = []
         var cleared: [TodoItem] = []
         do {
             let token = try await authManager.validAccessToken()
-            let results = await fetchCalendarEvents(eventIDs: eventIDs, accessToken: token, service: service)
+            let results = await fetchCalendarEvents(requests: requests, accessToken: token, service: service)
 
             for item in items {
                 guard let eventID = item.calendarEventID, let result = results[eventID] else { continue }
@@ -114,6 +161,7 @@ final class GoogleCalendarManager: ObservableObject {
                 case .deleted:
                     print("[Calendar] Event \(eventID) for \"\(item.title)\" was deleted on Google — clearing block")
                     item.calendarEventID = nil
+                    item.calendarID = nil
                     item.dueDate = nil
                     item.blockDurationSeconds = nil
                     item.lastModified = Date()
@@ -141,15 +189,65 @@ final class GoogleCalendarManager: ObservableObject {
         return CalendarPullOutcome(updated: updated, cleared: cleared)
     }
 
-    func deleteBlock(eventID: String) async {
+    func deleteBlock(calendarID: String?, eventID: String) async {
         print("[Calendar] Deleting event \(eventID)")
         do {
             let token = try await authManager.validAccessToken()
-            try await service.deleteEvent(eventID: eventID, accessToken: token)
+            try await service.deleteEvent(calendarID: calendarID ?? "primary", eventID: eventID, accessToken: token)
             errorMessage = nil
         } catch {
             print("[Calendar] Failed to delete event \(eventID): \(error.localizedDescription)")
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Moves every block still on the primary calendar (created before the
+    /// Blocks calendar existed) over to it: inserts a fresh event there
+    /// with the same details, then deletes the original.
+    func migrateLegacyBlocksToBlocksCalendar(items: [TodoItem], listNamesByID: [String: String]) async -> LegacyBlockMigrationOutcome {
+        guard !items.isEmpty else { return LegacyBlockMigrationOutcome(moved: 0, failed: 0) }
+        guard let calendarID = await ensureBlocksCalendar() else {
+            return LegacyBlockMigrationOutcome(moved: 0, failed: items.count)
+        }
+
+        var moved = 0
+        var failed = 0
+        do {
+            let token = try await authManager.validAccessToken()
+            for item in items {
+                guard let oldEventID = item.calendarEventID, let dueDate = item.dueDate, let duration = item.blockDurationSeconds else {
+                    failed += 1
+                    continue
+                }
+                let endTime = dueDate.addingTimeInterval(duration)
+                let listName = item.googleListID.flatMap { listNamesByID[$0] }
+                do {
+                    let newEvent = try await service.insertEvent(
+                        calendarID: calendarID,
+                        title: item.title,
+                        start: dueDate,
+                        end: endTime,
+                        description: listName,
+                        blocksTaskID: item.blocksTaskID ?? UUID().uuidString,
+                        accessToken: token
+                    )
+                    try await service.deleteEvent(calendarID: "primary", eventID: oldEventID, accessToken: token)
+                    item.calendarEventID = newEvent.id
+                    item.calendarID = calendarID
+                    item.lastModified = Date()
+                    moved += 1
+                    print("[Calendar] Moved block for \"\(item.title)\" to Blocks calendar: \(newEvent.id)")
+                } catch {
+                    print("[Calendar] Failed to move block for \"\(item.title)\": \(error.localizedDescription)")
+                    failed += 1
+                }
+            }
+            errorMessage = nil
+        } catch {
+            print("[Calendar] Migration failed: \(error.localizedDescription)")
+            errorMessage = error.localizedDescription
+            failed += items.count - moved
+        }
+        return LegacyBlockMigrationOutcome(moved: moved, failed: failed)
     }
 }
