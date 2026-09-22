@@ -944,7 +944,7 @@ private struct TodoRow: View {
 
             if isNotesExpanded {
                 Divider()
-                RichNoteEditor(text: notesBinding, onClose: { isNotesExpanded = false })
+                RichNoteEditor(text: notesBinding)
             }
         }
         .onHover { hovering in isHovering = hovering }

@@ -278,24 +278,18 @@ final class ListAwareTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         maybeAutoConvertListPrefix()
+        invalidateIntrinsicContentSize()
     }
 
-    func applyLink(urlString: String) {
-        let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = resolvedURL(from: trimmed), let storage = textStorage else { return }
-        let range = selectedRange()
-        guard range.length > 0 else { return }
-        storage.addAttribute(.link, value: url, range: range)
-        storage.addAttribute(.foregroundColor, value: NSColor.linkColor, range: range)
-        storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
-        didChangeText()
+    // Grows to fit the current text instead of scrolling, so the row's
+    // height always matches the number of lines actually typed.
+    override var intrinsicContentSize: NSSize {
+        guard let layoutManager, let textContainer else { return super.intrinsicContentSize }
+        layoutManager.ensureLayout(for: textContainer)
+        let height = layoutManager.usedRect(for: textContainer).height + textContainerInset.height * 2
+        return NSSize(width: NSView.noIntrinsicMetric, height: max(height, 20))
     }
 
-    private func resolvedURL(from string: String) -> URL? {
-        guard !string.isEmpty else { return nil }
-        if string.contains("://") { return URL(string: string) }
-        return URL(string: "https://\(string)")
-    }
 
     private func handleListContinuation() -> Bool {
         guard let storage = textStorage else { return false }
@@ -374,13 +368,15 @@ final class ListAwareTextView: NSTextView {
     }
 }
 
-/// A small rich-text note editor: a formatting toolbar (bold, italic,
-/// underline, link) above a wrapping, multi-line text view. Backed by
-/// NSTextView since SwiftUI's TextEditor can't do rich text or custom
+/// A small rich-text note editor: just a wrapping, multi-line text view,
+/// with no visible chrome — no formatting toolbar, no close button.
+/// Bold/italic/underline still work via Cmd-B/Cmd-I/Cmd-U, and links are
+/// picked up automatically when you type or paste a URL. Double-clicking
+/// the row (handled by the caller) is the only way to collapse it. Backed
+/// by NSTextView since SwiftUI's TextEditor can't do rich text or custom
 /// Return-key handling.
 struct RichNoteEditor: NSViewRepresentable {
     @Binding var text: String
-    var onClose: () -> Void
 
     func makeNSView(context: Context) -> NSView {
         let container = NSStackView()
@@ -388,38 +384,8 @@ struct RichNoteEditor: NSViewRepresentable {
         container.alignment = .leading
         container.spacing = 4
 
-        let toolbar = NSStackView()
-        toolbar.orientation = .horizontal
-        toolbar.spacing = 2
-
         let textView = ListAwareTextView()
         context.coordinator.textView = textView
-
-        func makeButton(symbol: String, tooltip: String, action: Selector) -> NSButton {
-            let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: tooltip) ?? NSImage(), target: context.coordinator, action: action)
-            button.isBordered = false
-            button.contentTintColor = .secondaryLabelColor
-            button.toolTip = tooltip
-            button.controlSize = .small
-            return button
-        }
-
-        toolbar.addArrangedSubview(makeButton(symbol: "bold", tooltip: "Bold (Cmd-B)", action: #selector(Coordinator.toggleBold)))
-        toolbar.addArrangedSubview(makeButton(symbol: "italic", tooltip: "Italic (Cmd-I)", action: #selector(Coordinator.toggleItalic)))
-        toolbar.addArrangedSubview(makeButton(symbol: "underline", tooltip: "Underline (Cmd-U)", action: #selector(Coordinator.toggleUnderline)))
-        toolbar.addArrangedSubview(makeButton(symbol: "link", tooltip: "Add Link", action: #selector(Coordinator.insertLink)))
-
-        let closeButton = NSButton(image: NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close") ?? NSImage(), target: context.coordinator, action: #selector(Coordinator.close))
-        closeButton.isBordered = false
-        closeButton.contentTintColor = .secondaryLabelColor
-        closeButton.toolTip = "Close"
-        closeButton.controlSize = .small
-
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let toolbarRow = NSStackView(views: [toolbar, spacer, closeButton])
-        toolbarRow.orientation = .horizontal
-        toolbarRow.distribution = .fill
 
         textView.isRichText = true
         textView.allowsUndo = true
@@ -440,24 +406,15 @@ struct RichNoteEditor: NSViewRepresentable {
         // out of sync with it.
         textView.drawsBackground = false
 
-        let scrollView = NSScrollView()
-        scrollView.documentView = textView
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.borderType = .noBorder
-        scrollView.drawsBackground = false
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.heightAnchor.constraint(equalToConstant: 90).isActive = true
-
-        container.addArrangedSubview(toolbarRow)
-        container.addArrangedSubview(scrollView)
-        toolbarRow.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
-        scrollView.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
+        // No scroll view — the text view grows to fit its content (see
+        // ListAwareTextView.intrinsicContentSize) so the row's height
+        // always matches the number of lines actually typed.
+        container.addArrangedSubview(textView)
+        textView.widthAnchor.constraint(equalTo: container.widthAnchor).isActive = true
 
         context.coordinator.onTextChange = { newText in
             if text != newText { text = newText }
         }
-        context.coordinator.onClose = onClose
 
         return container
     }
@@ -470,8 +427,15 @@ struct RichNoteEditor: NSViewRepresentable {
             textView.textStorage?.setAttributedString(RichTextFormat.attributedString(from: text))
             let length = (textView.string as NSString).length
             textView.setSelectedRange(NSRange(location: min(selectedRange.location, length), length: 0))
+            textView.invalidateIntrinsicContentSize()
         }
-        context.coordinator.onClose = onClose
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSView, context: Context) -> CGSize? {
+        let width = proposal.width ?? nsView.fittingSize.width
+        nsView.setFrameSize(NSSize(width: width, height: nsView.fittingSize.height))
+        nsView.layoutSubtreeIfNeeded()
+        return CGSize(width: width, height: nsView.fittingSize.height)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -481,42 +445,10 @@ struct RichNoteEditor: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         weak var textView: ListAwareTextView?
         var onTextChange: ((String) -> Void)?
-        var onClose: (() -> Void)?
 
         func textDidChange(_ notification: Notification) {
             guard let textView else { return }
             onTextChange?(RichTextFormat.markdown(from: textView.attributedString()))
-        }
-
-        @objc func toggleBold() {
-            textView?.toggleBold()
-            if let textView { onTextChange?(RichTextFormat.markdown(from: textView.attributedString())) }
-        }
-        @objc func toggleItalic() {
-            textView?.toggleItalic()
-            if let textView { onTextChange?(RichTextFormat.markdown(from: textView.attributedString())) }
-        }
-        @objc func toggleUnderline() {
-            textView?.toggleUnderlineStyle()
-            if let textView { onTextChange?(RichTextFormat.markdown(from: textView.attributedString())) }
-        }
-        @objc func close() { onClose?() }
-
-        @objc func insertLink() {
-            guard let textView, textView.selectedRange().length > 0 else { return }
-            let alert = NSAlert()
-            alert.messageText = "Add Link"
-            alert.informativeText = "Enter the URL for the selected text."
-            alert.addButton(withTitle: "Add")
-            alert.addButton(withTitle: "Cancel")
-            let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-            field.placeholderString = "https://example.com"
-            alert.accessoryView = field
-            alert.window.initialFirstResponder = field
-            if alert.runModal() == .alertFirstButtonReturn {
-                textView.applyLink(urlString: field.stringValue)
-                onTextChange?(RichTextFormat.markdown(from: textView.attributedString()))
-            }
         }
     }
 }
