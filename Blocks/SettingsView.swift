@@ -207,12 +207,11 @@ struct SettingsView: View {
     }
 
     private func migrateLegacyBlocks() {
-        let listNamesByID = Dictionary(uniqueKeysWithValues: tasksManager.taskLists.map { ($0.id, $0.title) })
         let items = legacyPrimaryBlocks
         isMigratingBlocks = true
         migrationResultMessage = nil
         Task {
-            let outcome = await calendarManager.migrateLegacyBlocksToBlocksCalendar(items: items, listNamesByID: listNamesByID)
+            let outcome = await calendarManager.migrateLegacyBlocksToBlocksCalendar(items: items)
             isMigratingBlocks = false
             migrationResultMessage = outcome.failed == 0
                 ? "Moved \(outcome.moved) time block(s)."

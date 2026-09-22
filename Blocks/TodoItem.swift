@@ -25,6 +25,11 @@ final class TodoItem {
     var calendarID: String?
     var blockDurationSeconds: Double?
     var manualOrder: Double?
+    // A lightweight markdown-ish note: **bold**, *italic*, _underline_,
+    // [text](url) links, and lines starting "- " or "1. " for lists. Synced
+    // both ways with Google Tasks' plain-text `notes` field, and pushed
+    // (one-way only) into the Calendar event's description.
+    var notes: String?
 
     init(title: String, section: TodoSection = .other) {
         self.title = title
@@ -40,5 +45,6 @@ final class TodoItem {
         self.calendarID = nil
         self.blockDurationSeconds = nil
         self.manualOrder = nil
+        self.notes = nil
     }
 }

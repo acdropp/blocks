@@ -12,6 +12,7 @@ struct GoogleTask: Codable {
     let due: String?
     let updated: String?
     let deleted: Bool?
+    let notes: String?
 
     var isCompleted: Bool { status == "completed" }
     var updatedDate: Date? { Self.parseDate(updated) }
@@ -32,9 +33,13 @@ private struct PatchTaskBody: Encodable {
     let title: String
     let status: String
     let due: String?
+    // Always sent, even when empty — unlike `due`, there's no separate
+    // "clear notes" endpoint, so an empty string is how a cleared note is
+    // represented on Google's side too.
+    let notes: String
 
     private enum CodingKeys: String, CodingKey {
-        case title, status, due
+        case title, status, due, notes
     }
 
     func encode(to encoder: Encoder) throws {
@@ -44,6 +49,7 @@ private struct PatchTaskBody: Encodable {
         if let due {
             try container.encode(due, forKey: .due)
         }
+        try container.encode(notes, forKey: .notes)
     }
 }
 
@@ -156,7 +162,7 @@ struct GoogleTasksService {
         return task
     }
 
-    func patchTask(listID: String, taskID: String, title: String, isCompleted: Bool, due: Date? = nil, accessToken: String) async throws -> GoogleTask {
+    func patchTask(listID: String, taskID: String, title: String, isCompleted: Bool, due: Date? = nil, notes: String = "", accessToken: String) async throws -> GoogleTask {
         let url = baseURL.appendingPathComponent("lists/\(listID)/tasks/\(taskID)")
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
@@ -165,7 +171,8 @@ struct GoogleTasksService {
         request.httpBody = try JSONEncoder().encode(PatchTaskBody(
             title: title,
             status: isCompleted ? "completed" : "needsAction",
-            due: due.map(Self.formatDueDate)
+            due: due.map(Self.formatDueDate),
+            notes: notes
         ))
 
         print("[Tasks] PATCH \(url.absoluteString)")

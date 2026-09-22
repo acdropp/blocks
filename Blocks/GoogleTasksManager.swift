@@ -175,6 +175,7 @@ final class GoogleTasksManager: ObservableObject {
                         if existing.calendarEventID == nil {
                             existing.dueDate = remote.dueDate
                         }
+                        existing.notes = remote.notes
                         existing.lastModified = remoteUpdated
                         updatedCount += 1
                     } else {
@@ -183,6 +184,7 @@ final class GoogleTasksManager: ObservableObject {
                         newItem.dueDate = remote.dueDate
                         newItem.googleTaskID = remote.id
                         newItem.googleListID = list.id
+                        newItem.notes = remote.notes
                         newItem.lastModified = remoteUpdated
                         context.insert(newItem)
                         localByGoogleID[remote.id] = newItem
@@ -254,6 +256,7 @@ final class GoogleTasksManager: ObservableObject {
                 title: item.title,
                 isCompleted: item.isCompleted,
                 due: item.dueDate,
+                notes: item.notes ?? "",
                 accessToken: token
             )
             print("[Tasks] Update confirmed for task \(taskID): status=\(remote.status ?? "nil")")

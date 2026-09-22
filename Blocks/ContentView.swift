@@ -30,6 +30,9 @@ struct ContentView: View {
     @AppStorage("isCompletedSectionHidden") private var isCompletedSectionHidden = false
     @State private var selection: PersistentIdentifier?
     @State private var editingItemID: PersistentIdentifier?
+    // A set (not a single ID) so multiple tasks' descriptions can be
+    // expanded at the same time.
+    @State private var expandedNotesItemIDs: Set<PersistentIdentifier> = []
 
     @State private var isFindBarVisible = false
     @State private var searchQuery = ""
@@ -122,6 +125,10 @@ struct ContentView: View {
                     }
                 }
             }
+            // The default list style draws a rounded blue selection
+            // outline around the whole row; .plain uses a simpler fill we
+            // can then paint over per-row to match the background exactly.
+            .listStyle(.plain)
             .onDeleteCommand {
                 deleteSelected()
             }
@@ -253,7 +260,7 @@ struct ContentView: View {
         let syncOutcome = await tasksManager.sync(context: modelContext)
 
         for item in syncOutcome.completionChanged {
-            await calendarManager.updateEventCompletionMark(for: item, listName: listName(for: item))
+            await calendarManager.updateEventCompletionMark(for: item)
         }
         for ref in syncOutcome.deletedEventRefs {
             await calendarManager.deleteBlock(calendarID: ref.calendarID, eventID: ref.eventID)
@@ -271,10 +278,6 @@ struct ContentView: View {
         }
 
         await fathomManager.fetchNewActionItems(context: modelContext)
-    }
-
-    private func listName(for item: TodoItem) -> String? {
-        tasksManager.taskLists.first(where: { $0.id == item.googleListID })?.title
     }
 
     @ViewBuilder
@@ -331,9 +334,22 @@ struct ContentView: View {
             get: { editingItemID == item.id },
             set: { editingItemID = $0 ? item.id : nil }
         )
+        let isNotesExpandedBinding = Binding<Bool>(
+            get: { expandedNotesItemIDs.contains(item.id) },
+            set: { expanded in
+                if expanded {
+                    expandedNotesItemIDs.insert(item.id)
+                } else {
+                    expandedNotesItemIDs.remove(item.id)
+                }
+            }
+        )
+        let hasNotes = !(item.notes ?? "").isEmpty
 
-        TodoRow(item: item, isEditing: isEditingBinding, searchQuery: searchQuery, currentMatchRange: currentMatchRange, isLate: isLate(item))
+        TodoRow(item: item, isEditing: isEditingBinding, isNotesExpanded: isNotesExpandedBinding, searchQuery: searchQuery, currentMatchRange: currentMatchRange, isLate: isLate(item))
             .tag(item.id)
+            // No background override here — section headers don't have one
+            // either, so leaving both unstyled guarantees they match exactly.
             .contextMenu {
                 Button("Move to Top Priorities") { move(item, to: .topPriority) }
                 Button("Move to Work Priorities") { move(item, to: .workPriority) }
@@ -360,6 +376,7 @@ struct ContentView: View {
                 }
                 Divider()
                 Button("Rename") { editingItemID = item.id }
+                Button(hasNotes ? "Edit Description" : "Add Description") { expandedNotesItemIDs.insert(item.id) }
                 Divider()
                 Button("Delete", role: .destructive) { delete(item) }
             }
@@ -492,10 +509,9 @@ struct ContentView: View {
         item.isCompleted = true
         item.lastModified = Date()
         print("[Tasks] Completed via context menu for \"\(item.title)\": task=\(item.googleTaskID ?? "nil") list=\(item.googleListID ?? "nil")")
-        let name = listName(for: item)
         Task {
             await tasksManager.pushUpdate(item)
-            await calendarManager.updateEventCompletionMark(for: item, listName: name)
+            await calendarManager.updateEventCompletionMark(for: item)
         }
     }
 
@@ -529,18 +545,21 @@ struct ContentView: View {
         let restored = TodoItem(title: snapshot.title, section: snapshot.section)
         restored.isCompleted = snapshot.isCompleted
         restored.manualOrder = snapshot.manualOrder ?? nextManualOrder()
+        restored.notes = snapshot.notes
         restored.lastModified = Date()
         modelContext.insert(restored)
         print("[Tasks] Undo delete: restored \"\(snapshot.title)\"")
 
         Task {
             await tasksManager.pushNewTask(restored)
+            // pushNewTask only sends the title; push again so the restored
+            // task's completion state and note make it to Google Tasks too.
+            await tasksManager.pushUpdate(restored)
             if let originalListID = snapshot.googleListID, restored.googleListID != originalListID {
                 moveToGoogleList(restored, to: originalListID)
             }
             if snapshot.hadCalendarBlock, let dueDate = snapshot.dueDate, let duration = snapshot.blockDurationSeconds {
-                let listName = tasksManager.taskLists.first(where: { $0.id == (snapshot.googleListID ?? restored.googleListID) })?.title
-                let success = await calendarManager.scheduleBlock(for: restored, duration: duration, startTime: dueDate, listName: listName)
+                let success = await calendarManager.scheduleBlock(for: restored, duration: duration, startTime: dueDate)
                 if success {
                     await tasksManager.pushUpdate(restored)
                 }
@@ -662,6 +681,7 @@ private struct DeletedTaskSnapshot {
     let manualOrder: Double?
     let blockDurationSeconds: Double?
     let hadCalendarBlock: Bool
+    let notes: String?
 
     init(item: TodoItem) {
         title = item.title
@@ -672,6 +692,7 @@ private struct DeletedTaskSnapshot {
         manualOrder = item.manualOrder
         blockDurationSeconds = item.blockDurationSeconds
         hadCalendarBlock = item.calendarEventID != nil
+        notes = item.notes
     }
 }
 
@@ -838,6 +859,7 @@ private struct TimeBlockPopover: View {
 private struct TodoRow: View {
     @Bindable var item: TodoItem
     @Binding var isEditing: Bool
+    @Binding var isNotesExpanded: Bool
     let searchQuery: String
     let currentMatchRange: Range<String.Index>?
     let isLate: Bool
@@ -858,64 +880,71 @@ private struct TodoRow: View {
     ]
 
     var body: some View {
-        HStack {
-            Toggle("", isOn: Binding(
-                get: { item.isCompleted },
-                set: { newValue in
-                    item.isCompleted = newValue
-                    item.lastModified = Date()
-                    print("[Tasks] Toggled completion for \"\(item.title)\": task=\(item.googleTaskID ?? "nil") list=\(item.googleListID ?? "nil") completed=\(newValue)")
-                    let name = tasksManager.taskLists.first(where: { $0.id == item.googleListID })?.title
-                    Task {
-                        await tasksManager.pushUpdate(item)
-                        await calendarManager.updateEventCompletionMark(for: item, listName: name)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Toggle("", isOn: Binding(
+                    get: { item.isCompleted },
+                    set: { newValue in
+                        item.isCompleted = newValue
+                        item.lastModified = Date()
+                        print("[Tasks] Toggled completion for \"\(item.title)\": task=\(item.googleTaskID ?? "nil") list=\(item.googleListID ?? "nil") completed=\(newValue)")
+                        Task {
+                            await tasksManager.pushUpdate(item)
+                            await calendarManager.updateEventCompletionMark(for: item)
+                        }
                     }
-                }
-            ))
-                .labelsHidden()
-                .toggleStyle(.checkbox)
+                ))
+                    .labelsHidden()
+                    .toggleStyle(.checkbox)
 
-            if isEditing {
-                TextField("Title", text: $draftTitle)
-                    .textFieldStyle(.plain)
-                    .focused($isTitleFocused)
-                    .onSubmit(commit)
-            } else {
-                Text(highlightedTitle)
-                    .foregroundStyle(isLate ? Color.lateTask : Color.primary)
-                    .onTapGesture(count: 2) { isEditing = true }
+                if isEditing {
+                    TextField("Title", text: $draftTitle)
+                        .textFieldStyle(.plain)
+                        .focused($isTitleFocused)
+                        .onSubmit(commit)
+                } else {
+                    Text(highlightedTitle)
+                        .foregroundStyle(isLate ? Color.lateTask : Color.primary)
 
-                Spacer()
+                    Spacer()
 
-                Group {
-                    if let scheduledLabel {
-                        Text(scheduledLabel)
-                            .font(.caption)
-                            .foregroundStyle(isLate ? Color.lateTask : Color.secondary)
-                            .onTapGesture { openBlockEditor() }
-                    } else if isHovering {
-                        HStack(spacing: 4) {
-                            ForEach(Self.blockDurations, id: \.seconds) { block in
-                                Button(block.label) {
-                                    pendingStartTime = Self.nextQuarterHour()
-                                    activeDurationPopover = block.seconds
+                    Group {
+                        if let scheduledLabel {
+                            Text(scheduledLabel)
+                                .font(.caption)
+                                .foregroundStyle(isLate ? Color.lateTask : Color.secondary)
+                                .onTapGesture { openBlockEditor() }
+                        } else if isHovering {
+                            HStack(spacing: 4) {
+                                ForEach(Self.blockDurations, id: \.seconds) { block in
+                                    Button(block.label) {
+                                        pendingStartTime = Self.nextQuarterHour()
+                                        activeDurationPopover = block.seconds
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.mini)
                                 }
-                                .buttonStyle(.bordered)
-                                .controlSize(.mini)
                             }
                         }
                     }
-                }
-                .frame(width: RowLayout.dueColumnWidth, alignment: .trailing)
+                    .frame(width: RowLayout.dueColumnWidth, alignment: .trailing)
 
-                Group {
-                    if let listName {
-                        Text(listName)
-                            .font(.caption)
-                            .foregroundStyle(isLate ? Color.lateTask : Color.secondary)
+                    Group {
+                        if let listName {
+                            Text(listName)
+                                .font(.caption)
+                                .foregroundStyle(isLate ? Color.lateTask : Color.secondary)
+                        }
                     }
+                    .frame(width: RowLayout.listColumnWidth, alignment: .trailing)
                 }
-                .frame(width: RowLayout.listColumnWidth, alignment: .trailing)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) { isNotesExpanded.toggle() }
+
+            if isNotesExpanded {
+                Divider()
+                RichNoteEditor(text: notesBinding, onClose: { isNotesExpanded = false })
             }
         }
         .onHover { hovering in isHovering = hovering }
@@ -927,6 +956,9 @@ private struct TodoRow: View {
         }
         .onChange(of: isTitleFocused) { _, focused in
             if !focused && isEditing { commit() }
+        }
+        .onChange(of: isNotesExpanded) { wasExpanded, expanded in
+            if wasExpanded && !expanded { pushNotes() }
         }
         .sheet(isPresented: Binding(
             get: { activeDurationPopover != nil },
@@ -976,9 +1008,8 @@ private struct TodoRow: View {
 
     private func confirmBlock(duration: TimeInterval) {
         let startTime = pendingStartTime
-        let listName = tasksManager.taskLists.first(where: { $0.id == item.googleListID })?.title
         Task {
-            let success = await calendarManager.scheduleBlock(for: item, duration: duration, startTime: startTime, listName: listName)
+            let success = await calendarManager.scheduleBlock(for: item, duration: duration, startTime: startTime)
             if success {
                 await tasksManager.pushUpdate(item)
                 moveToList(id: tasksManager.scheduledListID, settingName: "Scheduled list")
@@ -1062,6 +1093,27 @@ private struct TodoRow: View {
             rename(item, to: trimmed)
         }
         isEditing = false
+    }
+
+    private var notesBinding: Binding<String> {
+        Binding(
+            get: { item.notes ?? "" },
+            set: { item.notes = $0 }
+        )
+    }
+
+    /// Pushes the note to Google Tasks (and, if the task has a time block,
+    /// mirrors it into the Calendar event's description) once the notes
+    /// editor closes — mirrors how a title rename only pushes on commit,
+    /// not on every keystroke.
+    private func pushNotes() {
+        item.lastModified = Date()
+        Task {
+            await tasksManager.pushUpdate(item)
+            if item.calendarEventID != nil, let dueDate = item.dueDate, let duration = item.blockDurationSeconds {
+                await calendarManager.scheduleBlock(for: item, duration: duration, startTime: dueDate)
+            }
+        }
     }
 
     private func rename(_ item: TodoItem, to newTitle: String) {

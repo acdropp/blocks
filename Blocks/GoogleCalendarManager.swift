@@ -92,7 +92,7 @@ final class GoogleCalendarManager: ObservableObject {
     /// (created on first use); updates to an existing block stay on
     /// whatever calendar it's already on. Returns true on success.
     @discardableResult
-    func scheduleBlock(for item: TodoItem, duration: TimeInterval, startTime: Date, listName: String?) async -> Bool {
+    func scheduleBlock(for item: TodoItem, duration: TimeInterval, startTime: Date) async -> Bool {
         if item.blocksTaskID == nil {
             item.blocksTaskID = UUID().uuidString
         }
@@ -104,13 +104,13 @@ final class GoogleCalendarManager: ObservableObject {
             let event: GoogleCalendarEvent
             if let eventID = item.calendarEventID {
                 let calendarID = item.calendarID ?? "primary"
-                event = try await service.updateEvent(calendarID: calendarID, eventID: eventID, title: Self.eventTitle(for: item), start: startTime, end: endTime, description: listName, accessToken: token)
+                event = try await service.updateEvent(calendarID: calendarID, eventID: eventID, title: Self.eventTitle(for: item), start: startTime, end: endTime, description: item.notes, accessToken: token)
             } else {
                 guard let calendarID = await ensureBlocksCalendar() else {
                     errorMessage = "Couldn't set up the Blocks calendar."
                     return false
                 }
-                event = try await service.insertEvent(calendarID: calendarID, title: Self.eventTitle(for: item), start: startTime, end: endTime, description: listName, blocksTaskID: item.blocksTaskID!, accessToken: token)
+                event = try await service.insertEvent(calendarID: calendarID, title: Self.eventTitle(for: item), start: startTime, end: endTime, description: item.notes, blocksTaskID: item.blocksTaskID!, accessToken: token)
                 item.calendarID = calendarID
             }
             item.calendarEventID = event.id
@@ -200,7 +200,7 @@ final class GoogleCalendarManager: ObservableObject {
     /// Renames the task's calendar event to reflect its current completion
     /// state (adds/removes the "✓ " prefix). No-op if the task has no
     /// block. Safe to call any time completion changes, from either side.
-    func updateEventCompletionMark(for item: TodoItem, listName: String?) async {
+    func updateEventCompletionMark(for item: TodoItem) async {
         guard let eventID = item.calendarEventID, let dueDate = item.dueDate, let duration = item.blockDurationSeconds else { return }
         let calendarID = item.calendarID ?? "primary"
         let title = Self.eventTitle(for: item)
@@ -208,7 +208,7 @@ final class GoogleCalendarManager: ObservableObject {
         do {
             let token = try await authManager.validAccessToken()
             let endTime = dueDate.addingTimeInterval(duration)
-            _ = try await service.updateEvent(calendarID: calendarID, eventID: eventID, title: title, start: dueDate, end: endTime, description: listName, accessToken: token)
+            _ = try await service.updateEvent(calendarID: calendarID, eventID: eventID, title: title, start: dueDate, end: endTime, description: item.notes, accessToken: token)
             errorMessage = nil
         } catch {
             print("[Calendar] Failed to update completion mark for \"\(item.title)\": \(error.localizedDescription)")
@@ -254,7 +254,7 @@ final class GoogleCalendarManager: ObservableObject {
     /// Moves every block still on the primary calendar (created before the
     /// Blocks calendar existed) over to it: inserts a fresh event there
     /// with the same details, then deletes the original.
-    func migrateLegacyBlocksToBlocksCalendar(items: [TodoItem], listNamesByID: [String: String]) async -> LegacyBlockMigrationOutcome {
+    func migrateLegacyBlocksToBlocksCalendar(items: [TodoItem]) async -> LegacyBlockMigrationOutcome {
         guard !items.isEmpty else { return LegacyBlockMigrationOutcome(moved: 0, failed: 0) }
         guard let calendarID = await ensureBlocksCalendar() else {
             return LegacyBlockMigrationOutcome(moved: 0, failed: items.count)
@@ -270,14 +270,13 @@ final class GoogleCalendarManager: ObservableObject {
                     continue
                 }
                 let endTime = dueDate.addingTimeInterval(duration)
-                let listName = item.googleListID.flatMap { listNamesByID[$0] }
                 do {
                     let newEvent = try await service.insertEvent(
                         calendarID: calendarID,
                         title: Self.eventTitle(for: item),
                         start: dueDate,
                         end: endTime,
-                        description: listName,
+                        description: item.notes,
                         blocksTaskID: item.blocksTaskID ?? UUID().uuidString,
                         accessToken: token
                     )
