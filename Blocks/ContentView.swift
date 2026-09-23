@@ -36,6 +36,11 @@ struct ContentView: View {
     @AppStorage("otherToDosTitle") private var otherToDosTitle = "OTHER TO-DOS"
     @AppStorage("completedTitle") private var completedTitle = "COMPLETED"
     @AppStorage("personalSectionTitle") private var personalSectionTitle = "PERSONAL"
+    // The section display order, editable (via drag) in Settings. Read
+    // fresh from AppStorage on every access, so a reorder made in the
+    // Settings window is picked up here immediately.
+    @AppStorage("sectionOrder") private var sectionOrderRaw = SectionKind.defaultOrderString
+    private var sectionOrder: [SectionKind] { SectionKind.parseOrder(sectionOrderRaw) }
     @State private var selection: PersistentIdentifier?
     @State private var editingItemID: PersistentIdentifier?
     // A set (not a single ID) so multiple tasks' descriptions can be
@@ -84,64 +89,8 @@ struct ContentView: View {
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
 
-                if !isTopPrioritiesSectionHidden {
-                    sectionHeaderRow(displayTitle(topPrioritiesTitle, fallback: "TOP PRIORITIES"), isExpanded: $isTopPrioritiesExpanded)
-                    if isTopPrioritiesExpanded {
-                        let section = topPriorities
-                        ForEach(section) { item in
-                            row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
-                        }
-                    }
-                }
-
-                if !isWorkPrioritiesSectionHidden {
-                    sectionHeaderRow(displayTitle(workPrioritiesTitle, fallback: "WORK PRIORITIES"), isExpanded: $isWorkPrioritiesExpanded)
-                    if isWorkPrioritiesExpanded {
-                        let section = workPriorities
-                        ForEach(section) { item in
-                            row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
-                        }
-                    }
-                }
-
-                if !isChoresSectionHidden {
-                    sectionHeaderRow(displayTitle(choresTitle, fallback: "CHORES"), isExpanded: $isChoresExpanded)
-                    if isChoresExpanded {
-                        let section = chores
-                        ForEach(section) { item in
-                            row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
-                        }
-                    }
-                }
-
-                if !isOtherToDosSectionHidden {
-                    sectionHeaderRow(displayTitle(otherToDosTitle, fallback: "OTHER TO-DOS"), isExpanded: $isOtherToDosExpanded)
-                    if isOtherToDosExpanded {
-                        let section = otherToDos
-                        ForEach(section) { item in
-                            row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
-                        }
-                    }
-                }
-
-                if !isCompletedSectionHidden {
-                    sectionHeaderRow(displayTitle(completedTitle, fallback: "COMPLETED"), isExpanded: $isCompletedExpanded)
-                    if isCompletedExpanded {
-                        let section = completed
-                        ForEach(section) { item in
-                            row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
-                        }
-                    }
-                }
-
-                if tasksManager.isPersonalSectionVisible, tasksManager.personalListID != nil {
-                    sectionHeaderRow(displayTitle(personalSectionTitle, fallback: "PERSONAL"), isExpanded: $isPersonalExpanded)
-                    if isPersonalExpanded {
-                        let section = personalItems
-                        ForEach(section) { item in
-                            row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
-                        }
-                    }
+                ForEach(sectionOrder) { kind in
+                    sectionContent(for: kind)
                 }
             }
             // The default list style draws a rounded blue selection
@@ -240,6 +189,75 @@ struct ContentView: View {
     private func displayTitle(_ custom: String, fallback: String) -> String {
         let trimmed = custom.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? fallback : trimmed
+    }
+
+    /// Renders one section's header + rows, in whatever order Settings'
+    /// drag-to-reorder list currently specifies. Each case is exactly what
+    /// used to be a fixed, hardcoded block in the List body.
+    @ViewBuilder
+    private func sectionContent(for kind: SectionKind) -> some View {
+        switch kind {
+        case .topPriorities:
+            if !isTopPrioritiesSectionHidden {
+                sectionHeaderRow(displayTitle(topPrioritiesTitle, fallback: "TOP PRIORITIES"), isExpanded: $isTopPrioritiesExpanded)
+                if isTopPrioritiesExpanded {
+                    let section = topPriorities
+                    ForEach(section) { item in
+                        row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
+                    }
+                }
+            }
+        case .workPriorities:
+            if !isWorkPrioritiesSectionHidden {
+                sectionHeaderRow(displayTitle(workPrioritiesTitle, fallback: "WORK PRIORITIES"), isExpanded: $isWorkPrioritiesExpanded)
+                if isWorkPrioritiesExpanded {
+                    let section = workPriorities
+                    ForEach(section) { item in
+                        row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
+                    }
+                }
+            }
+        case .chores:
+            if !isChoresSectionHidden {
+                sectionHeaderRow(displayTitle(choresTitle, fallback: "CHORES"), isExpanded: $isChoresExpanded)
+                if isChoresExpanded {
+                    let section = chores
+                    ForEach(section) { item in
+                        row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
+                    }
+                }
+            }
+        case .otherToDos:
+            if !isOtherToDosSectionHidden {
+                sectionHeaderRow(displayTitle(otherToDosTitle, fallback: "OTHER TO-DOS"), isExpanded: $isOtherToDosExpanded)
+                if isOtherToDosExpanded {
+                    let section = otherToDos
+                    ForEach(section) { item in
+                        row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
+                    }
+                }
+            }
+        case .completed:
+            if !isCompletedSectionHidden {
+                sectionHeaderRow(displayTitle(completedTitle, fallback: "COMPLETED"), isExpanded: $isCompletedExpanded)
+                if isCompletedExpanded {
+                    let section = completed
+                    ForEach(section) { item in
+                        row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
+                    }
+                }
+            }
+        case .personal:
+            if tasksManager.isPersonalSectionVisible, tasksManager.personalListID != nil {
+                sectionHeaderRow(displayTitle(personalSectionTitle, fallback: "PERSONAL"), isExpanded: $isPersonalExpanded)
+                if isPersonalExpanded {
+                    let section = personalItems
+                    ForEach(section) { item in
+                        row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
+                    }
+                }
+            }
+        }
     }
 
     /// A plain (non-DisclosureGroup) collapsible section header: a button

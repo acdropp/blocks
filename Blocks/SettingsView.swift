@@ -30,6 +30,14 @@ struct SettingsView: View {
     @AppStorage("completedTitle") private var completedTitle = "COMPLETED"
     @AppStorage("personalSectionTitle") private var personalSectionTitle = "PERSONAL"
 
+    // Writes go through this AppStorage property (so the main window picks
+    // them up live); the local @State array is what drives the drag
+    // interaction itself and is kept in sync with it.
+    @AppStorage("sectionOrder") private var sectionOrderRaw = SectionKind.defaultOrderString
+    @State private var sectionOrder: [SectionKind] = SectionKind.parseOrder(
+        UserDefaults.standard.string(forKey: "sectionOrder") ?? SectionKind.defaultOrderString
+    )
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -169,27 +177,63 @@ struct SettingsView: View {
     @ViewBuilder
     private var sectionVisibilitySection: some View {
         cardLabel("Sections")
-        Text("Check the box to hide a section. Rename it in the field next to it.")
+        Text("Check the box to hide a section, rename it in the field, or drag the grip to reorder.")
             .font(.caption2)
             .foregroundStyle(.secondary)
 
-        sectionRow(isHidden: $isTopPrioritiesSectionHidden, title: $topPrioritiesTitle)
-        sectionRow(isHidden: $isWorkPrioritiesSectionHidden, title: $workPrioritiesTitle)
-        sectionRow(isHidden: $isChoresSectionHidden, title: $choresTitle)
-        sectionRow(isHidden: $isOtherToDosSectionHidden, title: $otherToDosTitle)
-        sectionRow(isHidden: $isCompletedSectionHidden, title: $completedTitle)
-        sectionRow(
-            isHidden: Binding(
+        ForEach(sectionOrder) { kind in
+            let bindings = bindings(for: kind)
+            sectionRow(isHidden: bindings.isHidden, title: bindings.title)
+                .draggable(kind.rawValue)
+                .dropDestination(for: String.self) { items, _ in
+                    guard let draggedRaw = items.first,
+                          let draggedKind = SectionKind(rawValue: draggedRaw),
+                          let fromIndex = sectionOrder.firstIndex(of: draggedKind),
+                          let toIndex = sectionOrder.firstIndex(of: kind),
+                          fromIndex != toIndex else { return false }
+                    withAnimation {
+                        sectionOrder.move(
+                            fromOffsets: IndexSet(integer: fromIndex),
+                            toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex
+                        )
+                    }
+                    sectionOrderRaw = sectionOrder.map(\.rawValue).joined(separator: ",")
+                    return true
+                }
+        }
+    }
+
+    /// Maps a section to the existing show/hide and title AppStorage
+    /// bindings already declared above — the Personal section's is
+    /// different (it's tasksManager's own published property, inverted)
+    /// rather than a plain AppStorage bool like the others.
+    private func bindings(for kind: SectionKind) -> (isHidden: Binding<Bool>, title: Binding<String>) {
+        switch kind {
+        case .topPriorities:
+            return ($isTopPrioritiesSectionHidden, $topPrioritiesTitle)
+        case .workPriorities:
+            return ($isWorkPrioritiesSectionHidden, $workPrioritiesTitle)
+        case .chores:
+            return ($isChoresSectionHidden, $choresTitle)
+        case .otherToDos:
+            return ($isOtherToDosSectionHidden, $otherToDosTitle)
+        case .completed:
+            return ($isCompletedSectionHidden, $completedTitle)
+        case .personal:
+            let isHidden = Binding<Bool>(
                 get: { !tasksManager.isPersonalSectionVisible },
                 set: { tasksManager.isPersonalSectionVisible = !$0 }
-            ),
-            title: $personalSectionTitle
-        )
+            )
+            return (isHidden, $personalSectionTitle)
+        }
     }
 
     @ViewBuilder
     private func sectionRow(isHidden: Binding<Bool>, title: Binding<String>) -> some View {
         HStack {
+            Image(systemName: "line.3.horizontal")
+                .foregroundStyle(.secondary)
+                .font(.caption)
             Toggle("", isOn: isHidden)
                 .toggleStyle(.checkbox)
                 .labelsHidden()
