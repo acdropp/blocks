@@ -23,6 +23,13 @@ struct SettingsView: View {
     @AppStorage("isOtherToDosSectionHidden") private var isOtherToDosSectionHidden = false
     @AppStorage("isCompletedSectionHidden") private var isCompletedSectionHidden = false
 
+    @AppStorage("topPrioritiesTitle") private var topPrioritiesTitle = "TOP PRIORITIES"
+    @AppStorage("workPrioritiesTitle") private var workPrioritiesTitle = "WORK PRIORITIES"
+    @AppStorage("choresTitle") private var choresTitle = "CHORES"
+    @AppStorage("otherToDosTitle") private var otherToDosTitle = "OTHER TO-DOS"
+    @AppStorage("completedTitle") private var completedTitle = "COMPLETED"
+    @AppStorage("personalSectionTitle") private var personalSectionTitle = "PERSONAL"
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -30,45 +37,69 @@ struct SettingsView: View {
                     .padding()
             }
             .frame(maxHeight: .infinity)
+            .scrollContentBackground(.hidden)
 
             Divider()
 
             Button("Close") {
                 NSApplication.shared.keyWindow?.close()
             }
+            .tint(Palette.accent)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.vertical, 12)
+            .background(Palette.cardBackground)
         }
         .frame(width: 340, height: 620)
+        .background(Palette.background)
+    }
+
+    /// A white rounded card matching the main app's task cards, used to
+    /// group each settings block instead of plain Divider()-separated rows.
+    @ViewBuilder
+    private func settingsCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Palette.cardBackground)
+        )
+    }
+
+    private func cardLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Palette.accent)
     }
 
     @ViewBuilder
     private var mainContent: some View {
         VStack(spacing: 12) {
             if let email = authManager.email {
-                Text(email)
-                Button("Sign Out") {
-                    authManager.signOut()
+                settingsCard {
+                    Text(email)
+                    Button("Sign Out") {
+                        authManager.signOut()
+                    }
+                    .tint(Palette.accent)
                 }
 
-                Divider()
-
-                Picker("New tasks go to", selection: $tasksManager.defaultTaskListID) {
-                    Text("None").tag(String?.none)
-                    ForEach(tasksManager.taskLists) { list in
-                        Text(list.title).tag(Optional(list.id))
+                settingsCard {
+                    Picker("New tasks go to", selection: $tasksManager.defaultTaskListID) {
+                        Text("None").tag(String?.none)
+                        ForEach(tasksManager.taskLists) { list in
+                            Text(list.title).tag(Optional(list.id))
+                        }
+                    }
+                    .task {
+                        await tasksManager.loadTaskLists()
                     }
                 }
-                .task {
-                    await tasksManager.loadTaskLists()
-                }
 
-                Divider()
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Auto-move lists")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                settingsCard {
+                    cardLabel("Auto-move lists")
 
                     Picker("Scheduled list", selection: $tasksManager.scheduledListID) {
                         Text("None").tag(String?.none)
@@ -87,12 +118,8 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Divider()
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Personal section")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                settingsCard {
+                    cardLabel("Personal section")
 
                     Picker("Personal list", selection: $tasksManager.personalListID) {
                         Text("None").tag(String?.none)
@@ -107,16 +134,19 @@ struct SettingsView: View {
                     }
                 }
 
-                Divider()
+                settingsCard {
+                    sectionVisibilitySection
+                }
 
-                sectionVisibilitySection
-
-                Divider()
-
-                calendarSection
+                settingsCard {
+                    calendarSection
+                }
             } else {
-                Button("Sign in with Google") {
-                    authManager.signIn()
+                settingsCard {
+                    Button("Sign in with Google") {
+                        authManager.signIn()
+                    }
+                    .tint(Palette.accent)
                 }
             }
 
@@ -126,83 +156,87 @@ struct SettingsView: View {
                     .font(.callout)
             }
 
-            Divider()
+            settingsCard {
+                fathomSection
+            }
 
-            fathomSection
-
-            Divider()
-
-            loginItemSection
+            settingsCard {
+                loginItemSection
+            }
         }
     }
 
     @ViewBuilder
     private var sectionVisibilitySection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Sections")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+        cardLabel("Sections")
+        Text("Check the box to hide a section. Rename it in the field next to it.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
 
-            Toggle("Hide Top Priorities", isOn: $isTopPrioritiesSectionHidden)
-                .toggleStyle(.checkbox)
-            Toggle("Hide Work Priorities", isOn: $isWorkPrioritiesSectionHidden)
-                .toggleStyle(.checkbox)
-            Toggle("Hide Chores", isOn: $isChoresSectionHidden)
-                .toggleStyle(.checkbox)
-            Toggle("Hide Other To-dos", isOn: $isOtherToDosSectionHidden)
-                .toggleStyle(.checkbox)
-            Toggle("Hide Completed", isOn: $isCompletedSectionHidden)
-                .toggleStyle(.checkbox)
-            Toggle("Hide Personal Section", isOn: Binding(
+        sectionRow(isHidden: $isTopPrioritiesSectionHidden, title: $topPrioritiesTitle)
+        sectionRow(isHidden: $isWorkPrioritiesSectionHidden, title: $workPrioritiesTitle)
+        sectionRow(isHidden: $isChoresSectionHidden, title: $choresTitle)
+        sectionRow(isHidden: $isOtherToDosSectionHidden, title: $otherToDosTitle)
+        sectionRow(isHidden: $isCompletedSectionHidden, title: $completedTitle)
+        sectionRow(
+            isHidden: Binding(
                 get: { !tasksManager.isPersonalSectionVisible },
                 set: { tasksManager.isPersonalSectionVisible = !$0 }
-            ))
+            ),
+            title: $personalSectionTitle
+        )
+    }
+
+    @ViewBuilder
+    private func sectionRow(isHidden: Binding<Bool>, title: Binding<String>) -> some View {
+        HStack {
+            Toggle("", isOn: isHidden)
                 .toggleStyle(.checkbox)
+                .labelsHidden()
+            TextField("Section name", text: title)
+                .textFieldStyle(.roundedBorder)
         }
     }
 
     @ViewBuilder
     private var calendarSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Time blocks")
-                .font(.caption)
+        cardLabel("Time blocks")
+
+        HStack {
+            Text("Blocks calendar")
+            Spacer()
+            Text(calendarManager.calendars.first(where: { $0.id == calendarManager.blocksCalendarID })?.summary ?? "Not set yet")
+                .foregroundStyle(.secondary)
+        }
+
+        if calendarManager.blocksCalendarID == nil {
+            Text("Created automatically the first time you schedule a task.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+
+        if let error = calendarManager.errorMessage {
+            Text(error)
+                .font(.caption2)
+                .foregroundStyle(.red)
+        }
+
+        if !legacyPrimaryBlocks.isEmpty {
+            Text("\(legacyPrimaryBlocks.count) time block(s) are still on your primary calendar.")
+                .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            HStack {
-                Text("Blocks calendar")
-                Spacer()
-                Text(calendarManager.calendars.first(where: { $0.id == calendarManager.blocksCalendarID })?.summary ?? "Not set yet")
-                    .foregroundStyle(.secondary)
+            Button(isMigratingBlocks ? "Moving…" : "Move to Blocks Calendar") {
+                migrateLegacyBlocks()
             }
+            .tint(Palette.accent)
+            .disabled(isMigratingBlocks)
+        }
 
-            if calendarManager.blocksCalendarID == nil {
-                Text("Created automatically the first time you schedule a task.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            if let error = calendarManager.errorMessage {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-            }
-
-            if !legacyPrimaryBlocks.isEmpty {
-                Text("\(legacyPrimaryBlocks.count) time block(s) are still on your primary calendar.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                Button(isMigratingBlocks ? "Moving…" : "Move to Blocks Calendar") {
-                    migrateLegacyBlocks()
-                }
-                .disabled(isMigratingBlocks)
-            }
-
-            if let migrationResultMessage {
-                Text(migrationResultMessage)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+        if let migrationResultMessage {
+            Text(migrationResultMessage)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -221,22 +255,20 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var loginItemSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Toggle("Launch Blocks at login", isOn: loginItemBinding)
+        Toggle("Launch Blocks at login", isOn: loginItemBinding)
+            .task {
+                loginItemManager.refreshStatus()
+            }
 
-            if loginItemManager.needsApproval {
-                Text("Enable Blocks in System Settings > General > Login Items & Extensions.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            if let error = loginItemManager.errorMessage {
-                Text(error)
-                    .font(.caption2)
-                    .foregroundStyle(.red)
-            }
+        if loginItemManager.needsApproval {
+            Text("Enable Blocks in System Settings > General > Login Items & Extensions.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
-        .task {
-            loginItemManager.refreshStatus()
+        if let error = loginItemManager.errorMessage {
+            Text(error)
+                .font(.caption2)
+                .foregroundStyle(.red)
         }
     }
 
@@ -249,54 +281,51 @@ struct SettingsView: View {
 
     @ViewBuilder
     private var fathomSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Fathom accounts")
+        cardLabel("Fathom accounts")
+
+        if fathomManager.accounts.isEmpty {
+            Text("No accounts added")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-
-            if fathomManager.accounts.isEmpty {
-                Text("No accounts added")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(fathomManager.accounts) { account in
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack {
-                            Text(account.name)
-                            Spacer()
-                            Button("Remove") {
-                                fathomManager.removeAccount(account)
-                            }
-                            .buttonStyle(.plain)
+        } else {
+            ForEach(fathomManager.accounts) { account in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(account.name)
+                        Spacer()
+                        Button("Remove") {
+                            fathomManager.removeAccount(account)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                    }
+                    if let error = fathomManager.accountErrors[account.id] {
+                        Text(error)
+                            .font(.caption2)
                             .foregroundStyle(.red)
-                            .font(.caption)
-                        }
-                        if let error = fathomManager.accountErrors[account.id] {
-                            Text(error)
-                                .font(.caption2)
-                                .foregroundStyle(.red)
-                        }
                     }
                 }
             }
+        }
 
-            Divider()
+        Divider()
 
-            VStack(alignment: .leading, spacing: 6) {
-                TextField("Account name (e.g. Work)", text: $newAccountName)
-                    .textFieldStyle(.roundedBorder)
-                SecureField("API key", text: $newAccountKey)
-                    .textFieldStyle(.roundedBorder)
-                Button("Add Account") {
-                    fathomManager.addAccount(name: newAccountName, apiKey: newAccountKey)
-                    newAccountName = ""
-                    newAccountKey = ""
-                }
-                .disabled(
-                    newAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                    newAccountKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                )
+        VStack(alignment: .leading, spacing: 6) {
+            TextField("Account name (e.g. Work)", text: $newAccountName)
+                .textFieldStyle(.roundedBorder)
+            SecureField("API key", text: $newAccountKey)
+                .textFieldStyle(.roundedBorder)
+            Button("Add Account") {
+                fathomManager.addAccount(name: newAccountName, apiKey: newAccountKey)
+                newAccountName = ""
+                newAccountKey = ""
             }
+            .tint(Palette.accent)
+            .disabled(
+                newAccountName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                newAccountKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
         }
     }
 }

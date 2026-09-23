@@ -28,6 +28,14 @@ struct ContentView: View {
     @AppStorage("isChoresSectionHidden") private var isChoresSectionHidden = false
     @AppStorage("isOtherToDosSectionHidden") private var isOtherToDosSectionHidden = false
     @AppStorage("isCompletedSectionHidden") private var isCompletedSectionHidden = false
+    // Custom section titles, editable in Settings. Purely cosmetic — the
+    // underlying TodoSection each one filters by never changes.
+    @AppStorage("topPrioritiesTitle") private var topPrioritiesTitle = "TOP PRIORITIES"
+    @AppStorage("workPrioritiesTitle") private var workPrioritiesTitle = "WORK PRIORITIES"
+    @AppStorage("choresTitle") private var choresTitle = "CHORES"
+    @AppStorage("otherToDosTitle") private var otherToDosTitle = "OTHER TO-DOS"
+    @AppStorage("completedTitle") private var completedTitle = "COMPLETED"
+    @AppStorage("personalSectionTitle") private var personalSectionTitle = "PERSONAL"
     @State private var selection: PersistentIdentifier?
     @State private var editingItemID: PersistentIdentifier?
     // A set (not a single ID) so multiple tasks' descriptions can be
@@ -77,7 +85,7 @@ struct ContentView: View {
                     .listRowSeparator(.hidden)
 
                 if !isTopPrioritiesSectionHidden {
-                    sectionHeaderRow("TOP PRIORITIES", isExpanded: $isTopPrioritiesExpanded)
+                    sectionHeaderRow(displayTitle(topPrioritiesTitle, fallback: "TOP PRIORITIES"), isExpanded: $isTopPrioritiesExpanded)
                     if isTopPrioritiesExpanded {
                         let section = topPriorities
                         ForEach(section) { item in
@@ -87,7 +95,7 @@ struct ContentView: View {
                 }
 
                 if !isWorkPrioritiesSectionHidden {
-                    sectionHeaderRow("WORK PRIORITIES", isExpanded: $isWorkPrioritiesExpanded)
+                    sectionHeaderRow(displayTitle(workPrioritiesTitle, fallback: "WORK PRIORITIES"), isExpanded: $isWorkPrioritiesExpanded)
                     if isWorkPrioritiesExpanded {
                         let section = workPriorities
                         ForEach(section) { item in
@@ -97,7 +105,7 @@ struct ContentView: View {
                 }
 
                 if !isChoresSectionHidden {
-                    sectionHeaderRow("CHORES", isExpanded: $isChoresExpanded)
+                    sectionHeaderRow(displayTitle(choresTitle, fallback: "CHORES"), isExpanded: $isChoresExpanded)
                     if isChoresExpanded {
                         let section = chores
                         ForEach(section) { item in
@@ -107,7 +115,7 @@ struct ContentView: View {
                 }
 
                 if !isOtherToDosSectionHidden {
-                    sectionHeaderRow("OTHER TO-DOS", isExpanded: $isOtherToDosExpanded)
+                    sectionHeaderRow(displayTitle(otherToDosTitle, fallback: "OTHER TO-DOS"), isExpanded: $isOtherToDosExpanded)
                     if isOtherToDosExpanded {
                         let section = otherToDos
                         ForEach(section) { item in
@@ -117,7 +125,7 @@ struct ContentView: View {
                 }
 
                 if !isCompletedSectionHidden {
-                    sectionHeaderRow("COMPLETED", isExpanded: $isCompletedExpanded)
+                    sectionHeaderRow(displayTitle(completedTitle, fallback: "COMPLETED"), isExpanded: $isCompletedExpanded)
                     if isCompletedExpanded {
                         let section = completed
                         ForEach(section) { item in
@@ -127,7 +135,7 @@ struct ContentView: View {
                 }
 
                 if tasksManager.isPersonalSectionVisible, tasksManager.personalListID != nil {
-                    sectionHeaderRow("PERSONAL", isExpanded: $isPersonalExpanded)
+                    sectionHeaderRow(displayTitle(personalSectionTitle, fallback: "PERSONAL"), isExpanded: $isPersonalExpanded)
                     if isPersonalExpanded {
                         let section = personalItems
                         ForEach(section) { item in
@@ -224,6 +232,14 @@ struct ContentView: View {
 
     private var syncErrorMessage: String? {
         tasksManager.errorMessage ?? calendarManager.errorMessage ?? fathomManager.accountErrors.values.first
+    }
+
+    /// Falls back to the default name if the custom one (editable in
+    /// Settings) is empty, so clearing the field doesn't leave a blank
+    /// header.
+    private func displayTitle(_ custom: String, fallback: String) -> String {
+        let trimmed = custom.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? fallback : trimmed
     }
 
     /// A plain (non-DisclosureGroup) collapsible section header: a button
