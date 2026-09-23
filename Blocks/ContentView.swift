@@ -38,6 +38,7 @@ struct ContentView: View {
     @State private var searchQuery = ""
     @State private var currentMatchIndex = 0
     @FocusState private var isSearchFieldFocused: Bool
+    @FocusState private var isAddTaskFocused: Bool
 
     @AppStorage("sortColumn") private var sortColumn: SortColumn = .manual
     @AppStorage("sortDirection") private var sortDirection: SortDirection = .ascending
@@ -51,19 +52,23 @@ struct ContentView: View {
     private let autoSyncTimer = Timer.publish(every: 300, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        ScrollViewReader { proxy in
+            ScrollViewReader { proxy in
             List(selection: $selection) {
-                quickAddBar
+                SelectionHighlightRemover()
+                    .frame(width: 0, height: 0)
                     .listRowInsets(EdgeInsets())
                     .listRowSeparator(.hidden)
 
-                sectionHeaderRow("FROM MEETINGS", isExpanded: $isFromMeetingsExpanded)
+                TitleBarColorizer()
+                    .frame(width: 0, height: 0)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+
+                sectionHeaderRow("FROM MEETINGS", isExpanded: $isFromMeetingsExpanded, topPadding: 0)
                 if isFromMeetingsExpanded {
-                    Divider()
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-                    ForEach(inboxItems) { item in
-                        inboxRow(for: item)
+                    let inbox = inboxItems
+                    ForEach(inbox) { item in
+                        inboxRow(for: item, isFirst: item.id == inbox.first?.id, isLast: item.id == inbox.last?.id)
                     }
                 }
 
@@ -74,8 +79,9 @@ struct ContentView: View {
                 if !isTopPrioritiesSectionHidden {
                     sectionHeaderRow("TOP PRIORITIES", isExpanded: $isTopPrioritiesExpanded)
                     if isTopPrioritiesExpanded {
-                        ForEach(topPriorities) { item in
-                            row(for: item)
+                        let section = topPriorities
+                        ForEach(section) { item in
+                            row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
                         }
                     }
                 }
@@ -83,8 +89,9 @@ struct ContentView: View {
                 if !isWorkPrioritiesSectionHidden {
                     sectionHeaderRow("WORK PRIORITIES", isExpanded: $isWorkPrioritiesExpanded)
                     if isWorkPrioritiesExpanded {
-                        ForEach(workPriorities) { item in
-                            row(for: item)
+                        let section = workPriorities
+                        ForEach(section) { item in
+                            row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
                         }
                     }
                 }
@@ -92,8 +99,9 @@ struct ContentView: View {
                 if !isChoresSectionHidden {
                     sectionHeaderRow("CHORES", isExpanded: $isChoresExpanded)
                     if isChoresExpanded {
-                        ForEach(chores) { item in
-                            row(for: item)
+                        let section = chores
+                        ForEach(section) { item in
+                            row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
                         }
                     }
                 }
@@ -101,8 +109,9 @@ struct ContentView: View {
                 if !isOtherToDosSectionHidden {
                     sectionHeaderRow("OTHER TO-DOS", isExpanded: $isOtherToDosExpanded)
                     if isOtherToDosExpanded {
-                        ForEach(otherToDos) { item in
-                            row(for: item)
+                        let section = otherToDos
+                        ForEach(section) { item in
+                            row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
                         }
                     }
                 }
@@ -110,8 +119,9 @@ struct ContentView: View {
                 if !isCompletedSectionHidden {
                     sectionHeaderRow("COMPLETED", isExpanded: $isCompletedExpanded)
                     if isCompletedExpanded {
-                        ForEach(completed) { item in
-                            row(for: item)
+                        let section = completed
+                        ForEach(section) { item in
+                            row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
                         }
                     }
                 }
@@ -119,8 +129,9 @@ struct ContentView: View {
                 if tasksManager.isPersonalSectionVisible, tasksManager.personalListID != nil {
                     sectionHeaderRow("PERSONAL", isExpanded: $isPersonalExpanded)
                     if isPersonalExpanded {
-                        ForEach(personalItems) { item in
-                            row(for: item)
+                        let section = personalItems
+                        ForEach(section) { item in
+                            row(for: item, isFirst: item.id == section.first?.id, isLast: item.id == section.last?.id)
                         }
                     }
                 }
@@ -129,6 +140,21 @@ struct ContentView: View {
             // outline around the whole row; .plain uses a simpler fill we
             // can then paint over per-row to match the background exactly.
             .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Palette.background)
+            // Anchored to the List itself (not a sibling view) so it's
+            // guaranteed the exact same width as the task-row cards below
+            // it, and stays pinned above the scrolling content.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                quickAddBar
+                    .background(Palette.background)
+            }
+            // Matches the lavender margin on the other sides — otherwise
+            // the last card in the list sits flush against the window's
+            // bottom edge with no breathing room.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear.frame(height: RowLayout.cardBottomMargin)
+            }
             .onDeleteCommand {
                 deleteSelected()
             }
@@ -175,6 +201,12 @@ struct ContentView: View {
                 syncStatusView
             }
         }
+        // The redesign is light-only (see Palette.swift). Without forcing
+        // this, native controls — like the quick-add field's own editing
+        // chrome while focused — still follow the system's actual Dark
+        // Mode setting, which doesn't match our hardcoded light colors and
+        // was making the field unreadable while typing.
+        .preferredColorScheme(.light)
     }
 
     @ViewBuilder
@@ -201,7 +233,7 @@ struct ContentView: View {
     /// strip the List's native row separators and default row height from
     /// each child row. Sibling rows below (in an `if isExpanded { ForEach }`
     /// right after this) stay genuine top-level List rows instead.
-    private func sectionHeaderRow(_ title: String, isExpanded: Binding<Bool>) -> some View {
+    private func sectionHeaderRow(_ title: String, isExpanded: Binding<Bool>, topPadding: CGFloat = 10) -> some View {
         Button {
             withAnimation {
                 isExpanded.wrappedValue.toggle()
@@ -209,13 +241,22 @@ struct ContentView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 13, weight: .bold))
                     .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
-                    .frame(width: RowLayout.leadingSpacerWidth, height: 20, alignment: .center)
+                    .frame(width: RowLayout.leadingSpacerWidth, height: 24, alignment: .center)
                 Text(title)
-                    .font(.headline)
+                    .font(.title3.weight(.bold))
                 Spacer()
             }
+            .foregroundStyle(Palette.accent)
+            // Task rows have an extra 14pt of inner padding beyond the
+            // card's margin (TodoRow's .padding(.horizontal, 14)), which
+            // is where the checkbox actually sits — match it here so the
+            // chevron centers over the checkboxes below it.
+            .padding(.leading, RowLayout.cardMargin + 14)
+            .padding(.trailing, RowLayout.cardTrailingMargin)
+            .padding(.top, topPadding)
+            .padding(.bottom, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -224,10 +265,30 @@ struct ContentView: View {
     @ViewBuilder
     private var quickAddBar: some View {
         VStack(spacing: 0) {
-            TextField("Add a task", text: $newTitle)
-                .textFieldStyle(.roundedBorder)
-                .padding()
-                .onSubmit(addTask)
+            TextField("Add a task...", text: $newTitle)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .foregroundStyle(Palette.textSecondary)
+                .focused($isAddTaskFocused)
+                .padding(.vertical, 10)
+                .padding(.horizontal, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: RowLayout.cardCornerRadius, style: .continuous)
+                        .fill(Palette.cardBackground)
+                )
+                .padding(.leading, RowLayout.cardMargin)
+                .padding(.trailing, RowLayout.quickAddTrailingMargin)
+                .padding(.top, 8)
+                .padding(.bottom, 0)
+                .onSubmit {
+                    addTask()
+                    isAddTaskFocused = false
+                }
+                .onKeyPress(.escape) {
+                    newTitle = ""
+                    isAddTaskFocused = false
+                    return .handled
+                }
 
             if isFindBarVisible {
                 HStack {
@@ -281,28 +342,34 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func inboxRow(for item: InboxItem) -> some View {
-        HStack {
-            Color.clear.frame(width: RowLayout.inboxRowIndent, height: 1)
+    private func inboxRow(for item: InboxItem, isFirst: Bool, isLast: Bool) -> some View {
+        cardWrap(isFirst: isFirst, isLast: isLast) {
+            HStack {
+                Color.clear.frame(width: RowLayout.inboxRowIndent, height: 1)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.text)
-                Text(inboxSubtitle(for: item))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.text)
+                        .foregroundStyle(Palette.textPrimary)
+                    Text(inboxSubtitle(for: item))
+                        .font(.caption)
+                        .foregroundStyle(Palette.textSecondary)
+                }
+
+                Spacer()
+
+                Menu("Accept") {
+                    Button("Top Priorities") { acceptInboxItem(item, to: .topPriority) }
+                    Button("Work Priorities") { acceptInboxItem(item, to: .workPriority) }
+                    Button("Chores") { acceptInboxItem(item, to: .chores) }
+                    Button("Other To-dos") { acceptInboxItem(item, to: .other) }
+                }
+                .tint(Palette.accent)
+                .fixedSize()
+
+                Button("Dismiss") { dismissInboxItem(item) }
             }
-
-            Spacer()
-
-            Menu("Accept") {
-                Button("Top Priorities") { acceptInboxItem(item, to: .topPriority) }
-                Button("Work Priorities") { acceptInboxItem(item, to: .workPriority) }
-                Button("Chores") { acceptInboxItem(item, to: .chores) }
-                Button("Other To-dos") { acceptInboxItem(item, to: .other) }
-            }
-            .fixedSize()
-
-            Button("Dismiss") { dismissInboxItem(item) }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
         }
     }
 
@@ -327,8 +394,37 @@ struct ContentView: View {
         modelContext.delete(item)
     }
 
+    /// Which corners round on a row at this position in its section, so
+    /// consecutive rows read as one continuous card with square edges
+    /// between them and rounded corners only at the very top and bottom.
+    private func cardCorners(isFirst: Bool, isLast: Bool) -> RectCorner {
+        var corners: RectCorner = []
+        if isFirst { corners.formUnion(.top) }
+        if isLast { corners.formUnion(.bottom) }
+        return corners
+    }
+
     @ViewBuilder
-    private func row(for item: TodoItem) -> some View {
+    private func cardWrap<Content: View>(isFirst: Bool, isLast: Bool, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .background(
+                RoundedCorner(radius: RowLayout.cardCornerRadius, corners: cardCorners(isFirst: isFirst, isLast: isLast))
+                    .fill(Palette.cardBackground)
+            )
+            .overlay(alignment: .bottom) {
+                if !isLast {
+                    Rectangle()
+                        .fill(Palette.cardDivider)
+                        .frame(height: 1)
+                        .padding(.horizontal, 14)
+                }
+            }
+            .listRowInsets(EdgeInsets(top: 0, leading: RowLayout.cardMargin, bottom: 0, trailing: RowLayout.cardTrailingMargin))
+            .listRowSeparator(.hidden)
+    }
+
+    @ViewBuilder
+    private func row(for item: TodoItem, isFirst: Bool, isLast: Bool) -> some View {
         let currentMatchRange: Range<String.Index>? = (currentMatch?.itemID == item.id) ? currentMatch?.range : nil
         let isEditingBinding = Binding<Bool>(
             get: { editingItemID == item.id },
@@ -346,10 +442,10 @@ struct ContentView: View {
         )
         let hasNotes = !(item.notes ?? "").isEmpty
 
-        TodoRow(item: item, isEditing: isEditingBinding, isNotesExpanded: isNotesExpandedBinding, searchQuery: searchQuery, currentMatchRange: currentMatchRange, isLate: isLate(item))
+        cardWrap(isFirst: isFirst, isLast: isLast) {
+            TodoRow(item: item, isEditing: isEditingBinding, isNotesExpanded: isNotesExpandedBinding, isSelected: selection == item.id, isFirst: isFirst, isLast: isLast, searchQuery: searchQuery, currentMatchRange: currentMatchRange, isLate: isLate(item))
+        }
             .tag(item.id)
-            // No background override here — section headers don't have one
-            // either, so leaving both unstyled guarantees they match exactly.
             .contextMenu {
                 Button("Move to Top Priorities") { move(item, to: .topPriority) }
                 Button("Move to Work Priorities") { move(item, to: .workPriority) }
@@ -696,29 +792,33 @@ private struct DeletedTaskSnapshot {
     }
 }
 
-/// Shared column widths so the header row and every task row line up
-/// exactly, regardless of how long the due/list text is on any given row.
-extension Color {
-    /// Flags a late task's title, scheduled time, and list name. Tuned
-    /// separately for light and dark mode so it stays readable against
-    /// either background.
-    static let lateTask = Color(NSColor(name: nil) { appearance in
-        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        return isDark
-            ? NSColor(red: 1.00, green: 0.45, blue: 0.55, alpha: 1.0)
-            : NSColor(red: 0.80, green: 0.20, blue: 0.32, alpha: 1.0)
-    })
-}
-
 private enum RowLayout {
     static let leadingSpacerWidth: CGFloat = 18
     static let dueColumnWidth: CGFloat = 150
     static let listColumnWidth: CGFloat = 90
+    // Made explicit (rather than relying on HStack's implicit default
+    // spacing) so the note editor's indent below can reference the exact
+    // same numbers and guarantee it lines up with the title, instead of
+    // us guessing at what the default spacing renders as.
+    static let checkboxSize: CGFloat = 18
+    static let checkboxTitleSpacing: CGFloat = 8
     // Rows nested inside a DisclosureGroup's content (like inbox rows under
     // FROM MEETINGS) sit further right than the DisclosureGroup's own label
     // by AppKit's built-in outline indent; this offsets that so inbox row
     // text lines up with a sibling section's label text (e.g. TOP PRIORITIES).
     static let inboxRowIndent: CGFloat = 14
+
+    // Shared geometry for the card redesign, so the quick-add field,
+    // section cards, and merged row corners all agree.
+    static let cardMargin: CGFloat = 20
+    static let cardTrailingMargin: CGFloat = 20
+    static let cardBottomMargin: CGFloat = 30
+    // The quick-add bar is pinned via .safeAreaInset, which is measured
+    // against the List's full width — unlike task-row cards, which lose a
+    // bit of width to the scrollbar gutter. This extra trailing padding
+    // brings the bar's right edge back in line with the cards below it.
+    static let quickAddTrailingMargin: CGFloat = 35
+    static let cardCornerRadius: CGFloat = 16
 }
 
 private enum SortColumn: String {
@@ -744,17 +844,22 @@ private struct SortHeaderRow: View {
             headerButton("SCHEDULED TIME", column: .due)
                 .frame(width: RowLayout.dueColumnWidth, alignment: .trailing)
 
-            headerButton("LIST NAME", column: .list)
+            headerButton("LIST NAME", column: .list, forceColor: Palette.textSecondary)
                 .frame(width: RowLayout.listColumnWidth, alignment: .trailing)
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(Palette.textSecondary)
+        .padding(.leading, RowLayout.cardMargin)
+        // Task rows have their own extra 14pt of inner padding beyond the
+        // card's margin (see TodoRow's .padding(.horizontal, 14)) — match
+        // it here so "LIST NAME" lines up with the values below it.
+        .padding(.trailing, RowLayout.cardTrailingMargin + 14)
         .padding(.vertical, 6)
         .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder
-    private func headerButton(_ title: String, column: SortColumn) -> some View {
+    private func headerButton(_ title: String, column: SortColumn, forceColor: Color? = nil) -> some View {
         Button {
             toggle(column)
         } label: {
@@ -767,6 +872,7 @@ private struct SortHeaderRow: View {
             }
         }
         .buttonStyle(.plain)
+        .foregroundStyle(forceColor ?? (sortColumn == column ? Palette.accent : Palette.textSecondary))
     }
 
     private func toggle(_ column: SortColumn) {
@@ -856,10 +962,47 @@ private struct TimeBlockPopover: View {
     }
 }
 
+/// A custom checkbox, drawn ourselves rather than via
+/// `.toggleStyle(.checkbox)` — tinting the native checkbox for the violet
+/// accent was found to make its unchecked/empty state render invisibly on
+/// this light background, so this draws both states explicitly instead.
+private struct CheckboxToggle: View {
+    @Binding var isOn: Bool
+
+    // A plain Button's click was found to be unreliable here — the List
+    // row's own click-to-select handling appears to intercept it. A
+    // direct tap gesture (the same technique already used elsewhere in
+    // this row, e.g. tapping the scheduled-time label) reaches the view
+    // reliably instead.
+    var body: some View {
+        RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(isOn ? Palette.accent : Color.clear)
+            .frame(width: RowLayout.checkboxSize, height: RowLayout.checkboxSize)
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(isOn ? Palette.accent : Palette.checkboxBorder, lineWidth: 1.5)
+            )
+            .overlay {
+                if isOn {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                isOn.toggle()
+            }
+    }
+}
+
 private struct TodoRow: View {
     @Bindable var item: TodoItem
     @Binding var isEditing: Bool
     @Binding var isNotesExpanded: Bool
+    let isSelected: Bool
+    let isFirst: Bool
+    let isLast: Bool
     let searchQuery: String
     let currentMatchRange: Range<String.Index>?
     let isLate: Bool
@@ -871,6 +1014,11 @@ private struct TodoRow: View {
     @State private var isHovering = false
     @State private var activeDurationPopover: TimeInterval?
     @State private var pendingStartTime = Date()
+    @State private var draftNotes = ""
+    // Whether the task had no description yet when the box was opened —
+    // if so, Escape aborts the whole "add a description" action and
+    // closes the box, rather than just reverting text within it.
+    @State private var wasNotesEmptyOnOpen = false
 
     private static let blockDurations: [(label: String, name: String, seconds: TimeInterval)] = [
         ("15m", "15 minutes", 900),
@@ -880,9 +1028,9 @@ private struct TodoRow: View {
     ]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Toggle("", isOn: Binding(
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: RowLayout.checkboxTitleSpacing) {
+                CheckboxToggle(isOn: Binding(
                     get: { item.isCompleted },
                     set: { newValue in
                         item.isCompleted = newValue
@@ -894,59 +1042,96 @@ private struct TodoRow: View {
                         }
                     }
                 ))
-                    .labelsHidden()
-                    .toggleStyle(.checkbox)
 
-                if isEditing {
-                    TextField("Title", text: $draftTitle)
-                        .textFieldStyle(.plain)
-                        .focused($isTitleFocused)
-                        .onSubmit(commit)
-                } else {
-                    Text(highlightedTitle)
-                        .foregroundStyle(isLate ? Color.lateTask : Color.primary)
+                Group {
+                    if isEditing {
+                        TextField("Title", text: $draftTitle)
+                            .textFieldStyle(.plain)
+                            .focused($isTitleFocused)
+                            .onSubmit(commit)
+                    } else {
+                        Text(highlightedTitle)
+                            .foregroundStyle(isLate ? Palette.lateTask : Palette.textPrimary)
 
-                    Spacer()
+                        Spacer()
 
-                    Group {
-                        if let scheduledLabel {
-                            Text(scheduledLabel)
-                                .font(.caption)
-                                .foregroundStyle(isLate ? Color.lateTask : Color.secondary)
-                                .onTapGesture { openBlockEditor() }
-                        } else if isHovering {
-                            HStack(spacing: 4) {
-                                ForEach(Self.blockDurations, id: \.seconds) { block in
-                                    Button(block.label) {
-                                        pendingStartTime = Self.nextQuarterHour()
-                                        activeDurationPopover = block.seconds
+                        Group {
+                            if let scheduledLabel {
+                                Text(scheduledLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(isLate ? Palette.lateTask : Palette.textSecondary)
+                                    .onTapGesture { openBlockEditor() }
+                                    .frame(width: RowLayout.dueColumnWidth, alignment: .trailing)
+                            } else if isHovering {
+                                HStack(spacing: 6) {
+                                    ForEach(Self.blockDurations, id: \.seconds) { block in
+                                        Button(block.label) {
+                                            pendingStartTime = Self.nextQuarterHour()
+                                            activeDurationPopover = block.seconds
+                                        }
+                                        .buttonStyle(.plain)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(Palette.accent)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 4)
+                                        .background(Capsule().fill(Palette.accentSubtle))
                                     }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.mini)
                                 }
+                                .frame(minWidth: RowLayout.dueColumnWidth, alignment: .trailing)
+                            } else {
+                                Color.clear.frame(width: RowLayout.dueColumnWidth, height: 1)
                             }
                         }
-                    }
-                    .frame(width: RowLayout.dueColumnWidth, alignment: .trailing)
 
-                    Group {
-                        if let listName {
-                            Text(listName)
-                                .font(.caption)
-                                .foregroundStyle(isLate ? Color.lateTask : Color.secondary)
+                        Group {
+                            if let listName {
+                                Text(listName)
+                                    .font(.caption)
+                                    .foregroundStyle(isLate ? Palette.lateTask : Palette.textSecondary)
+                            }
                         }
+                        .frame(width: RowLayout.listColumnWidth, alignment: .trailing)
                     }
-                    .frame(width: RowLayout.listColumnWidth, alignment: .trailing)
                 }
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { isNotesExpanded.toggle() }
             }
-            .contentShape(Rectangle())
-            .onTapGesture(count: 2) { isNotesExpanded.toggle() }
+            // Bleeds outward (negative padding) past this HStack's own
+            // bounds to reach the card's actual edges, canceling out the
+            // VStack's own .padding below — but only bleeds into the
+            // bottom edge when there's no description box beneath it, so
+            // an expanded description always stays white even when its
+            // task is selected.
+            .background(
+                RoundedCorner(radius: RowLayout.cardCornerRadius, corners: selectionCorners)
+                    .fill(isSelected ? Palette.selectedRow : Color.clear)
+                    .padding(.horizontal, -14)
+                    .padding(.top, -10)
+                    .padding(.bottom, isNotesExpanded ? 0 : -10)
+            )
 
             if isNotesExpanded {
-                Divider()
-                RichNoteEditor(text: notesBinding)
+                Rectangle()
+                    .fill(Palette.cardDivider)
+                    .frame(height: 1)
+                RichNoteEditor(
+                    text: $draftNotes,
+                    onCommit: { commitNotes() },
+                    onCancel: {
+                        draftNotes = item.notes ?? ""
+                        if wasNotesEmptyOnOpen { isNotesExpanded = false }
+                    }
+                )
+                    // Matches the checkbox's exact width plus the HStack's
+                    // exact spacing to the title (both explicit constants
+                    // now, not an assumed default) so the note's first
+                    // character lines up with the task title's first
+                    // character above it, not the checkbox.
+                    .padding(.leading, RowLayout.checkboxSize + RowLayout.checkboxTitleSpacing)
             }
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
         .onHover { hovering in isHovering = hovering }
         .onChange(of: isEditing) { _, editing in
             if editing {
@@ -958,7 +1143,12 @@ private struct TodoRow: View {
             if !focused && isEditing { commit() }
         }
         .onChange(of: isNotesExpanded) { wasExpanded, expanded in
-            if wasExpanded && !expanded { pushNotes() }
+            if !wasExpanded && expanded {
+                draftNotes = item.notes ?? ""
+                wasNotesEmptyOnOpen = draftNotes.isEmpty
+            } else if wasExpanded && !expanded {
+                commitNotes()
+            }
         }
         .sheet(isPresented: Binding(
             get: { activeDurationPopover != nil },
@@ -985,6 +1175,18 @@ private struct TodoRow: View {
     private var listName: String? {
         guard let listID = item.googleListID else { return nil }
         return tasksManager.taskLists.first(where: { $0.id == listID })?.title
+    }
+
+    /// Matches the card's own corner rounding at the top (if this is the
+    /// first row in its section) and bottom (if it's the last AND its
+    /// description isn't expanded — an expanded description occupies the
+    /// bottom of the card instead, so the selection tint shouldn't round
+    /// there).
+    private var selectionCorners: RectCorner {
+        var corners: RectCorner = []
+        if isFirst { corners.formUnion(.top) }
+        if isLast && !isNotesExpanded { corners.formUnion(.bottom) }
+        return corners
     }
 
     private var scheduledLabel: String? {
@@ -1095,18 +1297,14 @@ private struct TodoRow: View {
         isEditing = false
     }
 
-    private var notesBinding: Binding<String> {
-        Binding(
-            get: { item.notes ?? "" },
-            set: { item.notes = $0 }
-        )
-    }
-
-    /// Pushes the note to Google Tasks (and, if the task has a time block,
-    /// mirrors it into the Calendar event's description) once the notes
-    /// editor closes — mirrors how a title rename only pushes on commit,
-    /// not on every keystroke.
-    private func pushNotes() {
+    /// Applies the edited draft to the task and pushes it to Google Tasks
+    /// (and, if the task has a time block, mirrors it into the Calendar
+    /// event's description). Called on Enter (which saves but leaves the
+    /// editor open) and when double-clicking the row closes it — never on
+    /// Escape, which just reverts the draft instead.
+    private func commitNotes() {
+        guard item.notes != draftNotes else { return }
+        item.notes = draftNotes
         item.lastModified = Date()
         Task {
             await tasksManager.pushUpdate(item)

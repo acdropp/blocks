@@ -16,10 +16,10 @@ enum RichTextFormat {
 
     private static let baseFont = NSFont.systemFont(ofSize: 12)
 
-    // Explicit color: without it, text drawn from an attributed string
-    // falls back to black regardless of the window's light/dark appearance.
+    // Explicit color from the shared palette — without it, text drawn from
+    // an attributed string falls back to plain black.
     static var baseAttributes: [NSAttributedString.Key: Any] {
-        [.font: baseFont, .foregroundColor: NSColor.textColor]
+        [.font: baseFont, .foregroundColor: NSColor(Palette.textPrimary)]
     }
 
     private static func attributes(font: NSFont, underline: Bool = false) -> [NSAttributedString.Key: Any] {
@@ -203,19 +203,36 @@ enum RichTextFormat {
     }
 }
 
-/// A custom NSTextView that continues bullet/numbered lists on Return,
-/// auto-converts "- " / "1. " typed at the start of a line into a real
-/// list marker, and treats Shift+Return as a plain line break that never
-/// triggers list behavior.
+/// A custom NSTextView where Return commits and closes the note (like a
+/// single-line field's submit) and Escape discards the edit and closes —
+/// so list continuation ("- " / "1. " auto-converting, and continuing a
+/// list on the next line) moved to Shift+Return instead, which is also
+/// the plain line-break key.
 final class ListAwareTextView: NSTextView {
     private static let numberedTypedPrefixRegex = try! NSRegularExpression(pattern: "^(\\d+)\\.$")
+
+    var onCommit: (() -> Void)?
+    var onCancel: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 36 { // Return
             if event.modifierFlags.contains(.shift) {
+                if handleListContinuation() { return }
                 insertText("\n", replacementRange: selectedRange())
                 return
+            } else {
+                onCommit?()
+                // Blurs the cursor out of the box as visible confirmation
+                // the save happened, even though the box itself (per the
+                // caller's isNotesExpanded state) stays open.
+                window?.makeFirstResponder(nil)
+                return
             }
+        }
+        if event.keyCode == 53 { // Escape
+            onCancel?()
+            window?.makeFirstResponder(nil)
+            return
         }
         if event.modifierFlags.contains(.command), let chars = event.charactersIgnoringModifiers {
             switch chars.lowercased() {
@@ -268,11 +285,6 @@ final class ListAwareTextView: NSTextView {
             let current = typingAttributes[.underlineStyle] as? Int ?? 0
             typingAttributes[.underlineStyle] = current != 0 ? 0 : NSUnderlineStyle.single.rawValue
         }
-    }
-
-    override func insertNewline(_ sender: Any?) {
-        if handleListContinuation() { return }
-        super.insertNewline(sender)
     }
 
     override func didChangeText() {
@@ -377,6 +389,8 @@ final class ListAwareTextView: NSTextView {
 /// Return-key handling.
 struct RichNoteEditor: NSViewRepresentable {
     @Binding var text: String
+    var onCommit: () -> Void
+    var onCancel: () -> Void
 
     func makeNSView(context: Context) -> NSView {
         let container = NSStackView()
@@ -397,7 +411,7 @@ struct RichNoteEditor: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
         textView.delegate = context.coordinator
         textView.font = NSFont.systemFont(ofSize: 12)
-        textView.textColor = .textColor
+        textView.textColor = NSColor(Palette.textPrimary)
         textView.typingAttributes = RichTextFormat.baseAttributes
         textView.textContainerInset = NSSize(width: 4, height: 4)
         textView.textStorage?.setAttributedString(RichTextFormat.attributedString(from: text))
@@ -415,6 +429,15 @@ struct RichNoteEditor: NSViewRepresentable {
         context.coordinator.onTextChange = { newText in
             if text != newText { text = newText }
         }
+        textView.onCommit = onCommit
+        textView.onCancel = onCancel
+
+        // This view is freshly created each time the description opens
+        // (it's inside an `if isNotesExpanded` in the caller), so focusing
+        // it here puts the cursor in place immediately, every time.
+        DispatchQueue.main.async {
+            textView.window?.makeFirstResponder(textView)
+        }
 
         return container
     }
@@ -429,6 +452,8 @@ struct RichNoteEditor: NSViewRepresentable {
             textView.setSelectedRange(NSRange(location: min(selectedRange.location, length), length: 0))
             textView.invalidateIntrinsicContentSize()
         }
+        textView.onCommit = onCommit
+        textView.onCancel = onCancel
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSView, context: Context) -> CGSize? {
