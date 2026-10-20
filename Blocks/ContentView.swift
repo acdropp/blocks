@@ -336,7 +336,8 @@ struct ContentView: View {
                         onPrevious: goToPreviousMatch
                     )
                 }
-                .padding(.horizontal, 8)
+                .padding(.leading, RowLayout.cardMargin)
+                .padding(.trailing, RowLayout.quickAddTrailingMargin)
                 .padding(.bottom, 8)
                 .background {
                     Button("Close Find") { closeFindBar() }
@@ -933,31 +934,41 @@ private struct FindBar: View {
         HStack(spacing: 6) {
             TextField("Find", text: $searchQuery)
                 .textFieldStyle(.plain)
+                .foregroundStyle(Palette.textPrimary)
                 .focused(isFocused)
                 .onSubmit(onNext)
                 .frame(width: 120)
 
             Text(matchCount == 0 ? "0/0" : "\(currentMatchNumber)/\(matchCount)")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Palette.textSecondary)
                 .monospacedDigit()
 
             Button(action: onPrevious) {
                 Image(systemName: "chevron.up")
             }
             .buttonStyle(.plain)
+            .foregroundStyle(matchCount == 0 ? Palette.textSecondary.opacity(0.4) : Palette.accent)
             .disabled(matchCount == 0)
 
             Button(action: onNext) {
                 Image(systemName: "chevron.down")
             }
             .buttonStyle(.plain)
+            .foregroundStyle(matchCount == 0 ? Palette.textSecondary.opacity(0.4) : Palette.accent)
             .disabled(matchCount == 0)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .shadow(radius: 2)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Palette.cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Palette.cardDivider, lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
         .background {
             Button("Previous Match") { onPrevious() }
                 .keyboardShortcut(.return, modifiers: .shift)
