@@ -100,11 +100,6 @@ extension Notification.Name {
                 .environmentObject(tasksManager)
                 .environmentObject(calendarManager)
                 .environmentObject(fathomManager)
-                // Settings is a separate Scene from the main window, so it
-                // needs this too — without it, native controls (text
-                // fields, pickers) follow the system's actual Dark Mode
-                // setting regardless of our own light-only card design.
-                .preferredColorScheme(.light)
         }
         .modelContainer(container)
     }

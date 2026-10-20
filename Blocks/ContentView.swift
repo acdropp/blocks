@@ -16,13 +16,19 @@ struct ContentView: View {
 
     @State private var newTitle = ""
     @State private var isSyncing = false
-    @State private var isFromMeetingsExpanded = true
+    @AppStorage("appTheme") private var appThemeRaw = AppTheme.light.rawValue
+    private var appTheme: AppTheme { AppTheme(rawValue: appThemeRaw) ?? .light }
+    // Every section defaults to collapsed on each launch except Top
+    // Priorities — plain @State (not AppStorage) is what makes that
+    // "reset every time the app opens" rather than remembering whatever
+    // you last left it expanded/collapsed as.
+    @State private var isFromMeetingsExpanded = false
     @State private var isTopPrioritiesExpanded = true
-    @State private var isWorkPrioritiesExpanded = true
-    @State private var isChoresExpanded = true
-    @State private var isOtherToDosExpanded = true
+    @State private var isWorkPrioritiesExpanded = false
+    @State private var isChoresExpanded = false
+    @State private var isOtherToDosExpanded = false
     @State private var isCompletedExpanded = false
-    @AppStorage("isPersonalExpanded") private var isPersonalExpanded = false
+    @State private var isPersonalExpanded = false
     @AppStorage("isTopPrioritiesSectionHidden") private var isTopPrioritiesSectionHidden = false
     @AppStorage("isWorkPrioritiesSectionHidden") private var isWorkPrioritiesSectionHidden = false
     @AppStorage("isChoresSectionHidden") private var isChoresSectionHidden = false
@@ -158,12 +164,12 @@ struct ContentView: View {
                 syncStatusView
             }
         }
-        // The redesign is light-only (see Palette.swift). Without forcing
-        // this, native controls — like the quick-add field's own editing
-        // chrome while focused — still follow the system's actual Dark
-        // Mode setting, which doesn't match our hardcoded light colors and
-        // was making the field unreadable while typing.
-        .preferredColorScheme(.light)
+        // Forces the app's OWN chosen theme (not the system's actual Dark
+        // Mode setting) onto native controls too — without this, things
+        // like the quick-add field's editing chrome would follow the
+        // system appearance instead of Palette's colors, and could end up
+        // unreadable (e.g. light text on a light background).
+        .preferredColorScheme(appTheme.colorScheme)
     }
 
     @ViewBuilder
@@ -299,6 +305,21 @@ struct ContentView: View {
     @ViewBuilder
     private var quickAddBar: some View {
         VStack(spacing: 0) {
+            // Sits above the field. Both of the field's right corners are
+            // rounded, and their arc centers share the same X (16pt in
+            // from the field's right edge, i.e.
+            // quickAddTrailingMargin + cardCornerRadius from the window's
+            // true right edge) — this icon's own center is placed on
+            // that same vertical line, not just pushed to the trailing
+            // edge generically.
+            HStack {
+                Spacer()
+                themeToggleButton
+            }
+            .padding(.trailing, RowLayout.quickAddTrailingMargin + RowLayout.cardCornerRadius - 11)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
             TextField("Add a task...", text: $newTitle)
                 .textFieldStyle(.plain)
                 .font(.system(size: 14))
@@ -348,6 +369,19 @@ struct ContentView: View {
         }
     }
 
+    private var themeToggleButton: some View {
+        Button {
+            appThemeRaw = appTheme.toggled.rawValue
+        } label: {
+            Image(systemName: appTheme.icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(Palette.accent)
+                .frame(width: 22, height: 22)
+                .background(Circle().fill(Palette.cardBackground))
+        }
+        .buttonStyle(.plain)
+        .help(appTheme == .dark ? "Switch to Light Mode" : "Switch to Dark Mode")
+    }
 
     private func refresh() async {
         isSyncing = true
@@ -1007,6 +1041,123 @@ private struct TimeBlockPopover: View {
     }
 }
 
+/// Used only to measure the 2-hour button's rendered width so the custom-
+/// duration "+" button next to it can match it exactly.
+private struct TwoHourButtonWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+/// Lets the "+" button next to the 15m/30m/1h/2h quick-schedule buttons
+/// pick an arbitrary duration in 15-minute increments before handing off
+/// to the same TimeBlockPopover (start time + confirm) the fixed buttons use.
+private struct CustomDurationPicker: View {
+    @Binding var minutes: Int
+    let onNext: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var durationText: String
+
+    init(minutes: Binding<Int>, onNext: @escaping () -> Void) {
+        self._minutes = minutes
+        self.onNext = onNext
+        self._durationText = State(initialValue: Self.formattedHHMM(minutes.wrappedValue))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Custom Duration")
+                .font(.headline)
+            HStack(spacing: 6) {
+                TextField("HH:MM", text: $durationText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 70)
+                    .multilineTextAlignment(.center)
+                    .onSubmit(commitTypedDuration)
+                Stepper("", value: $minutes, in: 15...1440, step: 15)
+                    .labelsHidden()
+                    .onChange(of: minutes) { _, newValue in
+                        durationText = Self.formattedHHMM(newValue)
+                    }
+            }
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Next") {
+                    commitTypedDuration()
+                    onNext()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding()
+        .frame(width: 220)
+    }
+
+    /// Parses whatever's currently typed (if anything valid) into `minutes`,
+    /// then always rewrites the field to the canonical HH:MM form — so
+    /// "4.5", "4h30m", "4hr30min", and "4:30" all collapse to "04:30".
+    private func commitTypedDuration() {
+        if let parsed = Self.parseMinutes(from: durationText) {
+            minutes = parsed
+        }
+        durationText = Self.formattedHHMM(minutes)
+    }
+
+    private static func formattedHHMM(_ totalMinutes: Int) -> String {
+        String(format: "%02d:%02d", totalMinutes / 60, totalMinutes % 60)
+    }
+
+    /// Accepts "H:MM", "XhYm"/"Xhr Ymin" (and similar unit spellings), or a
+    /// bare number read as hours (e.g. "4.5" = 4.5 hours) — then rounds up
+    /// to the next 15-minute increment, since Calendar blocks only come in
+    /// quarter-hour sizes.
+    private static func parseMinutes(from rawText: String) -> Int? {
+        let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !text.isEmpty else { return nil }
+
+        if text.contains(":") {
+            let parts = text.split(separator: ":")
+            guard parts.count == 2,
+                  let hours = Double(parts[0]),
+                  let mins = Double(parts[1]) else { return nil }
+            return roundUpToQuarterHour(hours * 60 + mins)
+        }
+
+        var hoursValue = 0.0
+        var minutesValue = 0.0
+        var foundUnit = false
+
+        if let match = text.range(of: #"\d+(\.\d+)?\s*h(r|rs|our|ours)?"#, options: .regularExpression) {
+            let numberPart = text[match].prefix { $0.isNumber || $0 == "." }
+            hoursValue = Double(numberPart) ?? 0
+            foundUnit = true
+        }
+        if let match = text.range(of: #"\d+(\.\d+)?\s*m(in|ins|inute|inutes)?"#, options: .regularExpression) {
+            let numberPart = text[match].prefix { $0.isNumber || $0 == "." }
+            minutesValue = Double(numberPart) ?? 0
+            foundUnit = true
+        }
+        if foundUnit {
+            return roundUpToQuarterHour(hoursValue * 60 + minutesValue)
+        }
+
+        if let bareHours = Double(text) {
+            return roundUpToQuarterHour(bareHours * 60)
+        }
+
+        return nil
+    }
+
+    private static func roundUpToQuarterHour(_ minutes: Double) -> Int {
+        let step = 15.0
+        let rounded = (minutes / step).rounded(.up) * step
+        return min(1440, max(15, Int(rounded)))
+    }
+}
+
 /// A custom checkbox, drawn ourselves rather than via
 /// `.toggleStyle(.checkbox)` — tinting the native checkbox for the violet
 /// accent was found to make its unchecked/empty state render invisibly on
@@ -1059,6 +1210,9 @@ private struct TodoRow: View {
     @State private var isHovering = false
     @State private var activeDurationPopover: TimeInterval?
     @State private var pendingStartTime = Date()
+    @State private var isCustomDurationPickerVisible = false
+    @State private var customDurationMinutes = 15
+    @State private var twoHourButtonWidth: CGFloat?
     @State private var draftNotes = ""
     // Whether the task had no description yet when the box was opened —
     // if so, Escape aborts the whole "add a description" action and
@@ -1107,7 +1261,7 @@ private struct TodoRow: View {
                                     .foregroundStyle(isLate ? Palette.lateTask : Palette.textSecondary)
                                     .onTapGesture { openBlockEditor() }
                                     .frame(width: RowLayout.dueColumnWidth, alignment: .trailing)
-                            } else if isHovering {
+                            } else if isHovering || isCustomDurationPickerVisible {
                                 HStack(spacing: 6) {
                                     ForEach(Self.blockDurations, id: \.seconds) { block in
                                         Button(block.label) {
@@ -1120,8 +1274,39 @@ private struct TodoRow: View {
                                         .padding(.horizontal, 10)
                                         .padding(.vertical, 4)
                                         .background(Capsule().fill(Palette.accentSubtle))
+                                        .background {
+                                            // Reads the 2-hour button's rendered width so the
+                                            // custom-duration "+" button next to it can be sized
+                                            // to match exactly, instead of guessing a constant.
+                                            if block.seconds == Self.blockDurations.last?.seconds {
+                                                GeometryReader { geo in
+                                                    Color.clear.preference(key: TwoHourButtonWidthKey.self, value: geo.size.width)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Button {
+                                        customDurationMinutes = 15
+                                        isCustomDurationPickerVisible = true
+                                    } label: {
+                                        Image(systemName: "plus")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(Palette.accent)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .frame(width: twoHourButtonWidth)
+                                    .padding(.vertical, 4)
+                                    .background(Capsule().fill(Palette.accentSubtle))
+                                    .sheet(isPresented: $isCustomDurationPickerVisible) {
+                                        CustomDurationPicker(minutes: $customDurationMinutes) {
+                                            isCustomDurationPickerVisible = false
+                                            pendingStartTime = Self.nextQuarterHour()
+                                            activeDurationPopover = TimeInterval(customDurationMinutes * 60)
+                                        }
                                     }
                                 }
+                                .onPreferenceChange(TwoHourButtonWidthKey.self) { twoHourButtonWidth = $0 }
                                 .frame(minWidth: RowLayout.dueColumnWidth, alignment: .trailing)
                             } else {
                                 Color.clear.frame(width: RowLayout.dueColumnWidth, height: 1)
@@ -1199,10 +1384,9 @@ private struct TodoRow: View {
             get: { activeDurationPopover != nil },
             set: { if !$0 { activeDurationPopover = nil } }
         )) {
-            if let duration = activeDurationPopover,
-               let block = Self.blockDurations.first(where: { $0.seconds == duration }) {
+            if let duration = activeDurationPopover {
                 TimeBlockPopover(
-                    durationName: block.name,
+                    durationName: Self.durationName(for: duration),
                     startTime: $pendingStartTime,
                     onConfirm: {
                         confirmBlock(duration: duration)
@@ -1239,6 +1423,20 @@ private struct TodoRow: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "MM/dd/yy EEE h:mm a"
         return formatter.string(from: dueDate).uppercased()
+    }
+
+    /// Formats any duration (including custom ones not in blockDurations)
+    /// for the popover's header, e.g. "45 minutes" or "1h 15m".
+    private static func durationName(for seconds: TimeInterval) -> String {
+        if let block = blockDurations.first(where: { $0.seconds == seconds }) {
+            return block.name
+        }
+        let totalMinutes = Int(seconds / 60)
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours == 0 { return "\(minutes) minutes" }
+        if minutes == 0 { return hours == 1 ? "1 hour" : "\(hours) hours" }
+        return "\(hours)h \(minutes)m"
     }
 
     private static func nextQuarterHour() -> Date {

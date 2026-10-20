@@ -17,6 +17,12 @@ struct SettingsView: View {
     @State private var isMigratingBlocks = false
     @State private var migrationResultMessage: String?
 
+    // Settings is a separate Scene from the main window, so it reads the
+    // same shared "appTheme" key independently rather than inheriting
+    // ContentView's.
+    @AppStorage("appTheme") private var appThemeRaw = AppTheme.light.rawValue
+    private var appTheme: AppTheme { AppTheme(rawValue: appThemeRaw) ?? .light }
+
     @AppStorage("isTopPrioritiesSectionHidden") private var isTopPrioritiesSectionHidden = false
     @AppStorage("isWorkPrioritiesSectionHidden") private var isWorkPrioritiesSectionHidden = false
     @AppStorage("isChoresSectionHidden") private var isChoresSectionHidden = false
@@ -59,6 +65,7 @@ struct SettingsView: View {
         }
         .frame(width: 340, height: 620)
         .background(Palette.background)
+        .preferredColorScheme(appTheme.colorScheme)
     }
 
     /// A white rounded card matching the main app's task cards, used to
