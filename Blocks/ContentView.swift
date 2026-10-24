@@ -15,6 +15,13 @@ struct ContentView: View {
     @EnvironmentObject private var fathomManager: FathomManager
 
     @State private var newTitle = ""
+    // The Add bar's quick-schedule buttons (15m/30m/1h/2h/+), which only
+    // appear once a title has been typed. A non-nil duration shows the
+    // start-time popover; Confirm there creates the task already scheduled.
+    @State private var quickAddDuration: TimeInterval?
+    @State private var quickAddStartTime = Date()
+    @State private var isQuickAddCustomPickerVisible = false
+    @State private var quickAddCustomMinutes = 15
     @State private var isSyncing = false
     @AppStorage("appTheme") private var appThemeRaw = AppTheme.light.rawValue
     private var appTheme: AppTheme { AppTheme(rawValue: appThemeRaw) ?? .light }
@@ -320,30 +327,46 @@ struct ContentView: View {
             .padding(.top, 10)
             .padding(.bottom, 6)
 
-            TextField("Add a task...", text: $newTitle)
-                .textFieldStyle(.plain)
-                .font(.system(size: 14))
-                .foregroundStyle(Palette.textSecondary)
-                .focused($isAddTaskFocused)
-                .padding(.vertical, 10)
-                .padding(.horizontal, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: RowLayout.cardCornerRadius, style: .continuous)
-                        .fill(Palette.cardBackground)
-                )
-                .padding(.leading, RowLayout.cardMargin)
-                .padding(.trailing, RowLayout.quickAddTrailingMargin)
-                .padding(.top, 8)
-                .padding(.bottom, 0)
-                .onSubmit {
-                    addTask()
-                    isAddTaskFocused = false
+            HStack(spacing: 8) {
+                TextField("Add a task...", text: $newTitle)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14))
+                    .foregroundStyle(Palette.textSecondary)
+                    .focused($isAddTaskFocused)
+                    .onSubmit {
+                        addTask()
+                        isAddTaskFocused = false
+                    }
+                    .onKeyPress(.escape) {
+                        newTitle = ""
+                        isAddTaskFocused = false
+                        return .handled
+                    }
+
+                if !newTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    quickScheduleButtons
                 }
-                .onKeyPress(.escape) {
-                    newTitle = ""
-                    isAddTaskFocused = false
-                    return .handled
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
+            .background(
+                RoundedRectangle(cornerRadius: RowLayout.cardCornerRadius, style: .continuous)
+                    .fill(Palette.cardBackground)
+            )
+            .padding(.leading, RowLayout.cardMargin)
+            .padding(.trailing, RowLayout.quickAddTrailingMargin)
+            .padding(.top, 8)
+            .padding(.bottom, 0)
+            // Both sheets hang off views that stay on screen, not off the
+            // buttons themselves — the buttons vanish the moment Confirm
+            // clears the title, which would tear down a sheet attached there.
+            .sheet(isPresented: $isQuickAddCustomPickerVisible) {
+                CustomDurationPicker(minutes: $quickAddCustomMinutes) {
+                    isQuickAddCustomPickerVisible = false
+                    quickAddStartTime = TimeBlock.nextQuarterHour()
+                    quickAddDuration = TimeInterval(quickAddCustomMinutes * 60)
                 }
+            }
 
             if isFindBarVisible {
                 HStack {
@@ -366,6 +389,57 @@ struct ContentView: View {
                         .hidden()
                 }
             }
+        }
+        .sheet(isPresented: Binding(
+            get: { quickAddDuration != nil },
+            set: { if !$0 { quickAddDuration = nil } }
+        )) {
+            if let duration = quickAddDuration {
+                TimeBlockPopover(
+                    durationName: TimeBlock.durationName(for: duration),
+                    startTime: $quickAddStartTime,
+                    onConfirm: {
+                        addScheduledTask(duration: duration, startTime: quickAddStartTime)
+                        quickAddDuration = nil
+                    },
+                    onRemove: nil
+                )
+            }
+        }
+    }
+
+    /// Same look and flow as a task row's hover buttons: a fixed size opens
+    /// the start-time popover straight away, "+" asks for a custom duration
+    /// first. Nothing is created until Confirm in the popover.
+    private var quickScheduleButtons: some View {
+        HStack(spacing: 6) {
+            ForEach(TimeBlock.durations, id: \.seconds) { block in
+                Button(block.label) {
+                    quickAddStartTime = TimeBlock.nextQuarterHour()
+                    quickAddDuration = block.seconds
+                }
+                .buttonStyle(.plain)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Palette.accent)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(Palette.accentSubtle))
+                .help("Add and schedule for \(block.name)")
+            }
+
+            Button {
+                quickAddCustomMinutes = 15
+                isQuickAddCustomPickerVisible = true
+            } label: {
+                Image(systemName: "plus")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Palette.accent)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(Palette.accentSubtle))
+            .help("Add and schedule for a custom duration")
         }
     }
 
@@ -635,14 +709,52 @@ struct ContentView: View {
     }
 
     private func addTask() {
+        guard let item = insertNewTaskFromAddBar() else { return }
+        Task { await tasksManager.pushNewTask(item) }
+    }
+
+    /// The Add bar's quick-schedule path. Same steps as scheduling an
+    /// existing task from its row, but in a fixed order: the task has to
+    /// exist on Google Tasks first, so the follow-up update and the move
+    /// to the Scheduled list have a task to act on.
+    private func addScheduledTask(duration: TimeInterval, startTime: Date) {
+        guard let item = insertNewTaskFromAddBar() else { return }
+        isAddTaskFocused = false
+        Task {
+            await tasksManager.pushNewTask(item)
+            let success = await calendarManager.scheduleBlock(for: item, duration: duration, startTime: startTime)
+            guard success else { return }
+            await tasksManager.pushUpdate(item)
+            await moveNewTaskToScheduledList(item)
+        }
+    }
+
+    /// Creates a local task from whatever's typed in the Add bar and clears
+    /// the field. Returns nil (and does nothing) if the field is blank.
+    private func insertNewTaskFromAddBar() -> TodoItem? {
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return nil }
         let item = TodoItem(title: trimmed)
         item.lastModified = Date()
         item.manualOrder = nextManualOrder()
         modelContext.insert(item)
         newTitle = ""
-        Task { await tasksManager.pushNewTask(item) }
+        return item
+    }
+
+    /// Unlike moveToGoogleList, this doesn't register an Undo — undoing the
+    /// move of a task that was just created already scheduled makes no sense.
+    private func moveNewTaskToScheduledList(_ item: TodoItem) async {
+        guard let scheduledListID = tasksManager.scheduledListID,
+              let taskID = item.googleTaskID,
+              let currentListID = item.googleListID,
+              scheduledListID != currentListID else { return }
+
+        item.googleListID = scheduledListID
+        if let errorMessage = await tasksManager.moveTask(taskID: taskID, from: currentListID, to: scheduledListID) {
+            item.googleListID = currentListID
+            print("[Tasks] Reverted auto-move to Scheduled list for new task: \(errorMessage)")
+        }
     }
 
     // MARK: - Manual order & drag to reorder
@@ -1011,6 +1123,38 @@ private struct FindBar: View {
     }
 }
 
+/// The time-block sizes and helpers shared by task rows' hover buttons and
+/// the Add bar's quick-schedule buttons.
+private enum TimeBlock {
+    static let durations: [(label: String, name: String, seconds: TimeInterval)] = [
+        ("15m", "15 minutes", 900),
+        ("30m", "30 minutes", 1800),
+        ("1h", "1 hour", 3600),
+        ("2h", "2 hours", 7200),
+    ]
+
+    /// Formats any duration (including custom ones not in `durations`)
+    /// for the popover's header, e.g. "45 minutes" or "1h 15m".
+    static func durationName(for seconds: TimeInterval) -> String {
+        if let block = durations.first(where: { $0.seconds == seconds }) {
+            return block.name
+        }
+        let totalMinutes = Int(seconds / 60)
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        if hours == 0 { return "\(minutes) minutes" }
+        if minutes == 0 { return hours == 1 ? "1 hour" : "\(hours) hours" }
+        return "\(hours)h \(minutes)m"
+    }
+
+    static func nextQuarterHour() -> Date {
+        let interval: TimeInterval = 15 * 60
+        let now = Date()
+        let remainder = now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: interval)
+        return remainder == 0 ? now : now.addingTimeInterval(interval - remainder)
+    }
+}
+
 private struct TimeBlockPopover: View {
     let durationName: String
     @Binding var startTime: Date
@@ -1219,13 +1363,6 @@ private struct TodoRow: View {
     // closes the box, rather than just reverting text within it.
     @State private var wasNotesEmptyOnOpen = false
 
-    private static let blockDurations: [(label: String, name: String, seconds: TimeInterval)] = [
-        ("15m", "15 minutes", 900),
-        ("30m", "30 minutes", 1800),
-        ("1h", "1 hour", 3600),
-        ("2h", "2 hours", 7200),
-    ]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: RowLayout.checkboxTitleSpacing) {
@@ -1263,9 +1400,9 @@ private struct TodoRow: View {
                                     .frame(width: RowLayout.dueColumnWidth, alignment: .trailing)
                             } else if isHovering || isCustomDurationPickerVisible {
                                 HStack(spacing: 6) {
-                                    ForEach(Self.blockDurations, id: \.seconds) { block in
+                                    ForEach(TimeBlock.durations, id: \.seconds) { block in
                                         Button(block.label) {
-                                            pendingStartTime = Self.nextQuarterHour()
+                                            pendingStartTime = TimeBlock.nextQuarterHour()
                                             activeDurationPopover = block.seconds
                                         }
                                         .buttonStyle(.plain)
@@ -1278,7 +1415,7 @@ private struct TodoRow: View {
                                             // Reads the 2-hour button's rendered width so the
                                             // custom-duration "+" button next to it can be sized
                                             // to match exactly, instead of guessing a constant.
-                                            if block.seconds == Self.blockDurations.last?.seconds {
+                                            if block.seconds == TimeBlock.durations.last?.seconds {
                                                 GeometryReader { geo in
                                                     Color.clear.preference(key: TwoHourButtonWidthKey.self, value: geo.size.width)
                                                 }
@@ -1301,7 +1438,7 @@ private struct TodoRow: View {
                                     .sheet(isPresented: $isCustomDurationPickerVisible) {
                                         CustomDurationPicker(minutes: $customDurationMinutes) {
                                             isCustomDurationPickerVisible = false
-                                            pendingStartTime = Self.nextQuarterHour()
+                                            pendingStartTime = TimeBlock.nextQuarterHour()
                                             activeDurationPopover = TimeInterval(customDurationMinutes * 60)
                                         }
                                     }
@@ -1386,7 +1523,7 @@ private struct TodoRow: View {
         )) {
             if let duration = activeDurationPopover {
                 TimeBlockPopover(
-                    durationName: Self.durationName(for: duration),
+                    durationName: TimeBlock.durationName(for: duration),
                     startTime: $pendingStartTime,
                     onConfirm: {
                         confirmBlock(duration: duration)
@@ -1425,30 +1562,9 @@ private struct TodoRow: View {
         return formatter.string(from: dueDate).uppercased()
     }
 
-    /// Formats any duration (including custom ones not in blockDurations)
-    /// for the popover's header, e.g. "45 minutes" or "1h 15m".
-    private static func durationName(for seconds: TimeInterval) -> String {
-        if let block = blockDurations.first(where: { $0.seconds == seconds }) {
-            return block.name
-        }
-        let totalMinutes = Int(seconds / 60)
-        let hours = totalMinutes / 60
-        let minutes = totalMinutes % 60
-        if hours == 0 { return "\(minutes) minutes" }
-        if minutes == 0 { return hours == 1 ? "1 hour" : "\(hours) hours" }
-        return "\(hours)h \(minutes)m"
-    }
-
-    private static func nextQuarterHour() -> Date {
-        let interval: TimeInterval = 15 * 60
-        let now = Date()
-        let remainder = now.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: interval)
-        return remainder == 0 ? now : now.addingTimeInterval(interval - remainder)
-    }
-
     private func openBlockEditor() {
-        pendingStartTime = item.dueDate ?? Self.nextQuarterHour()
-        activeDurationPopover = item.blockDurationSeconds ?? Self.blockDurations[2].seconds
+        pendingStartTime = item.dueDate ?? TimeBlock.nextQuarterHour()
+        activeDurationPopover = item.blockDurationSeconds ?? TimeBlock.durations[2].seconds
     }
 
     private func confirmBlock(duration: TimeInterval) {
