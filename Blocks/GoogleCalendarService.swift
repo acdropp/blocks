@@ -6,6 +6,11 @@ struct GoogleCalendarEvent: Codable {
     let summary: String?
     let start: EventDateTimeResponse?
     let end: EventDateTimeResponse?
+    let extendedProperties: ExtendedProperties?
+
+    /// The Google Tasks ID this event is linked to, if any app (Blocks or
+    /// Make It So) stored one on it.
+    var googleTaskID: String? { extendedProperties?.private?["googleTaskID"] }
 
     var startDate: Date? { start?.dateTime.flatMap(GoogleCalendarService.parseDate) }
     var endDate: Date? { end?.dateTime.flatMap(GoogleCalendarService.parseDate) }
@@ -41,8 +46,8 @@ private struct EventDateTime: Encodable {
     let timeZone: String
 }
 
-private struct ExtendedProperties: Encodable {
-    let `private`: [String: String]
+struct ExtendedProperties: Codable {
+    let `private`: [String: String]?
 }
 
 private struct InsertEventBody: Encodable {
@@ -58,6 +63,14 @@ private struct UpdateEventBody: Encodable {
     let description: String?
     let start: EventDateTime
     let end: EventDateTime
+    // Optional so it's left out of the JSON when nil. On PATCH, Google
+    // merges these keys into the event's existing private properties
+    // rather than replacing them, so blocksTaskID is kept.
+    let extendedProperties: ExtendedProperties?
+}
+
+private struct PatchPropertiesBody: Encodable {
+    let extendedProperties: ExtendedProperties
 }
 
 struct GoogleCalendarService: Sendable {
@@ -112,11 +125,11 @@ struct GoogleCalendarService: Sendable {
             print("[Calendar] Event \(eventID) is cancelled")
             return nil
         }
-        print("[Calendar] Fetched event \(eventID), summary: \"\(event.summary ?? "nil")\"")
+        print("[Calendar] Fetched event \(eventID), summary: \"\(event.summary ?? "nil")\", private properties: \(event.extendedProperties?.private ?? [:])")
         return event
     }
 
-    func insertEvent(calendarID: String, title: String, start: Date, end: Date, description: String?, blocksTaskID: String, accessToken: String) async throws -> GoogleCalendarEvent {
+    func insertEvent(calendarID: String, title: String, start: Date, end: Date, description: String?, blocksTaskID: String, googleTaskID: String?, accessToken: String) async throws -> GoogleCalendarEvent {
         let url = eventsURL(calendarID: calendarID)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -127,7 +140,7 @@ struct GoogleCalendarService: Sendable {
             description: description,
             start: Self.eventDateTime(start),
             end: Self.eventDateTime(end),
-            extendedProperties: ExtendedProperties(private: ["blocksTaskID": blocksTaskID])
+            extendedProperties: ExtendedProperties(private: Self.privateProperties(blocksTaskID: blocksTaskID, googleTaskID: googleTaskID))
         ))
 
         print("[Calendar] POST \(url.absoluteString)")
@@ -139,7 +152,7 @@ struct GoogleCalendarService: Sendable {
         return event
     }
 
-    func updateEvent(calendarID: String, eventID: String, title: String, start: Date, end: Date, description: String?, accessToken: String) async throws -> GoogleCalendarEvent {
+    func updateEvent(calendarID: String, eventID: String, title: String, start: Date, end: Date, description: String?, googleTaskID: String?, accessToken: String) async throws -> GoogleCalendarEvent {
         let url = eventsURL(calendarID: calendarID).appendingPathComponent(eventID)
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
@@ -149,7 +162,8 @@ struct GoogleCalendarService: Sendable {
             summary: title,
             description: description,
             start: Self.eventDateTime(start),
-            end: Self.eventDateTime(end)
+            end: Self.eventDateTime(end),
+            extendedProperties: googleTaskID.map { ExtendedProperties(private: ["googleTaskID": $0]) }
         ))
 
         print("[Calendar] PATCH \(url.absoluteString)")
@@ -159,6 +173,27 @@ struct GoogleCalendarService: Sendable {
         let event = try JSONDecoder().decode(GoogleCalendarEvent.self, from: data)
         print("[Calendar] Updated event \(event.id), Google now reports summary: \"\(event.summary ?? "nil")\"")
         return event
+    }
+
+    /// Adds/overwrites only the given private properties on an event,
+    /// leaving everything else (including other private keys) untouched.
+    func patchPrivateProperties(calendarID: String, eventID: String, properties: [String: String], accessToken: String) async throws {
+        let url = eventsURL(calendarID: calendarID).appendingPathComponent(eventID)
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(PatchPropertiesBody(extendedProperties: ExtendedProperties(private: properties)))
+
+        print("[Calendar] PATCH \(url.absoluteString) (private properties \(properties))")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try Self.checkResponse(response, data: data, context: "patch event properties")
+    }
+
+    private static func privateProperties(blocksTaskID: String, googleTaskID: String?) -> [String: String] {
+        var properties = ["blocksTaskID": blocksTaskID]
+        properties["googleTaskID"] = googleTaskID
+        return properties
     }
 
     func deleteEvent(calendarID: String, eventID: String, accessToken: String) async throws {

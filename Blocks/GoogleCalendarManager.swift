@@ -104,13 +104,13 @@ final class GoogleCalendarManager: ObservableObject {
             let event: GoogleCalendarEvent
             if let eventID = item.calendarEventID {
                 let calendarID = item.calendarID ?? "primary"
-                event = try await service.updateEvent(calendarID: calendarID, eventID: eventID, title: Self.eventTitle(for: item), start: startTime, end: endTime, description: item.notes, accessToken: token)
+                event = try await service.updateEvent(calendarID: calendarID, eventID: eventID, title: Self.eventTitle(for: item), start: startTime, end: endTime, description: item.notes, googleTaskID: item.googleTaskID, accessToken: token)
             } else {
                 guard let calendarID = await ensureBlocksCalendar() else {
                     errorMessage = "Couldn't set up the Blocks calendar."
                     return false
                 }
-                event = try await service.insertEvent(calendarID: calendarID, title: Self.eventTitle(for: item), start: startTime, end: endTime, description: item.notes, blocksTaskID: item.blocksTaskID!, accessToken: token)
+                event = try await service.insertEvent(calendarID: calendarID, title: Self.eventTitle(for: item), start: startTime, end: endTime, description: item.notes, blocksTaskID: item.blocksTaskID!, googleTaskID: item.googleTaskID, accessToken: token)
                 item.calendarID = calendarID
             }
             item.calendarEventID = event.id
@@ -168,6 +168,17 @@ final class GoogleCalendarManager: ObservableObject {
                     cleared.append(item)
 
                 case .found(let event):
+                    // Backfill: events made before Blocks stored the Google
+                    // Task ID get it written once, so other apps (Make It So)
+                    // can tell which task the event belongs to.
+                    if let googleTaskID = item.googleTaskID, event.googleTaskID != googleTaskID {
+                        do {
+                            try await service.patchPrivateProperties(calendarID: item.calendarID ?? "primary", eventID: eventID, properties: ["googleTaskID": googleTaskID], accessToken: token)
+                            print("[Calendar] Backfilled googleTaskID on event \(eventID) for \"\(item.title)\"")
+                        } catch {
+                            print("[Calendar] Failed to backfill googleTaskID on event \(eventID): \(error.localizedDescription)")
+                        }
+                    }
                     guard let start = event.startDate, let end = event.endDate else { continue }
                     let duration = end.timeIntervalSince(start)
                     let startChanged = item.dueDate.map { abs($0.timeIntervalSince(start)) > 1 } ?? true
@@ -208,7 +219,7 @@ final class GoogleCalendarManager: ObservableObject {
         do {
             let token = try await authManager.validAccessToken()
             let endTime = dueDate.addingTimeInterval(duration)
-            _ = try await service.updateEvent(calendarID: calendarID, eventID: eventID, title: title, start: dueDate, end: endTime, description: item.notes, accessToken: token)
+            _ = try await service.updateEvent(calendarID: calendarID, eventID: eventID, title: title, start: dueDate, end: endTime, description: item.notes, googleTaskID: item.googleTaskID, accessToken: token)
             errorMessage = nil
         } catch {
             print("[Calendar] Failed to update completion mark for \"\(item.title)\": \(error.localizedDescription)")
@@ -278,6 +289,7 @@ final class GoogleCalendarManager: ObservableObject {
                         end: endTime,
                         description: item.notes,
                         blocksTaskID: item.blocksTaskID ?? UUID().uuidString,
+                        googleTaskID: item.googleTaskID,
                         accessToken: token
                     )
                     try await service.deleteEvent(calendarID: "primary", eventID: oldEventID, accessToken: token)
