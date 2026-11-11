@@ -256,7 +256,7 @@ struct SettingsView: View {
         HStack {
             Text("Blocks calendar")
             Spacer()
-            Text(calendarManager.calendars.first(where: { $0.id == calendarManager.blocksCalendarID })?.summary ?? "Not set yet")
+            Text(calendarManager.blocksCalendarID == nil ? "Not set yet" : GoogleCalendarManager.blocksCalendarName)
                 .foregroundStyle(.secondary)
         }
 

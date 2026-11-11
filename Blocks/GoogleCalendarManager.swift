@@ -51,7 +51,6 @@ final class GoogleCalendarManager: ObservableObject {
     static let blocksCalendarName = "Blocks"
 
     @Published private(set) var errorMessage: String?
-    @Published private(set) var calendars: [GoogleCalendarListEntry] = []
     @Published var blocksCalendarID: String? {
         didSet {
             UserDefaults.standard.set(blocksCalendarID, forKey: Self.blocksCalendarIDKey)
@@ -77,7 +76,6 @@ final class GoogleCalendarManager: ObservableObject {
         do {
             let token = try await authManager.validAccessToken()
             let created = try await service.insertCalendar(summary: Self.blocksCalendarName, accessToken: token)
-            calendars.append(created)
             blocksCalendarID = created.id
             return created.id
         } catch {
