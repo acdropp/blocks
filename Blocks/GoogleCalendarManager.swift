@@ -333,7 +333,16 @@ final class GoogleCalendarManager: ObservableObject {
                         googleTaskID: item.googleTaskID,
                         accessToken: token
                     )
-                    try await service.deleteEvent(calendarID: "primary", eventID: oldEventID, accessToken: token)
+                    do {
+                        try await service.deleteEvent(calendarID: "primary", eventID: oldEventID, accessToken: token)
+                    } catch {
+                        // Couldn't remove the original, so remove the copy we
+                        // just made. Otherwise each failed attempt leaves an
+                        // untracked duplicate on the Blocks calendar.
+                        print("[Calendar] Couldn't delete original \(oldEventID) — removing new copy \(newEvent.id)")
+                        try? await service.deleteEvent(calendarID: calendarID, eventID: newEvent.id, accessToken: token)
+                        throw error
+                    }
                     item.calendarEventID = newEvent.id
                     item.calendarID = calendarID
                     item.lastModified = Date()
