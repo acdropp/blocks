@@ -20,7 +20,8 @@ Full product description: specs/product.md
 
 ## Integration facts
 - Google Tasks stores only a due date; any time is discarded. The Calendar event owns the time.
-- Link a time block to its task by storing the task ID in the event's extendedProperties.private.
+- Link a time block to its task via the event's extendedProperties.private: `blocksTaskID` (Blocks-local UUID) and `googleTaskID` (the Google Tasks ID). `googleTaskID` is the shared key with the Make It So web app, which edits the same Blocks calendar and Google Tasks. It's written on every event insert and update (PATCH, which merges private keys rather than replacing them), and sync backfills it onto any linked event missing it.
+- Event adoption: on each sync, Blocks lists events on the Blocks calendar ending in the last 30 days or later. Some may carry the `googleTaskID` of a local task that has no block yet (e.g. Make It So scheduled it). Blocks links the task to that event (eventID, calendarID, time from the event) instead of ever creating a second event.
 - Time block sizes: 15 min, 30 min, 1 hour, 2 hours only.
 - Fathom: no webhooks (no public URL). Fetch new meetings with action items using a created-after filter. Check the current Fathom API docs before writing this code.
 - Google account is a personal Gmail.
