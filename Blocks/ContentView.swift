@@ -772,6 +772,12 @@ struct ContentView: View {
     }
 
     private func move(_ item: TodoItem, to section: TodoSection) {
+        // Personal is decided by the Google Tasks list, not the section, so a
+        // Personal task also has to leave that list to show up elsewhere.
+        if isPersonalListItem(item), let defaultListID = tasksManager.defaultTaskListID,
+           defaultListID != tasksManager.personalListID {
+            moveToGoogleList(item, to: defaultListID)
+        }
         let oldSection = item.section
         guard oldSection != section else { return }
         item.section = section
