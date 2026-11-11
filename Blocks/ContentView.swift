@@ -638,12 +638,12 @@ struct ContentView: View {
     }
 
     private var completed: [TodoItem] {
-        sorted(items.filter { $0.isCompleted && !isPersonalListItem($0) })
+        sorted(items.filter { $0.isCompleted && (!isPersonalListItem($0) || tasksManager.isPersonalSectionVisible) })
     }
 
     private var personalItems: [TodoItem] {
         guard let personalListID = tasksManager.personalListID else { return [] }
-        return sorted(items.filter { $0.googleListID == personalListID })
+        return sorted(items.filter { $0.googleListID == personalListID && !$0.isCompleted })
     }
 
     private func isPersonalListItem(_ item: TodoItem) -> Bool {
