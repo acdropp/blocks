@@ -135,9 +135,11 @@ final class GoogleCalendarManager: ObservableObject {
     /// never deleted. Only checks tasks that have a block, and fetches
     /// all their events concurrently.
     func pullChanges(context: ModelContext) async -> CalendarPullOutcome {
+        let adopted = await adoptEventsFromOtherApps(context: context)
+
         let descriptor = FetchDescriptor<TodoItem>(predicate: #Predicate<TodoItem> { $0.calendarEventID != nil })
         guard let items = try? context.fetch(descriptor), !items.isEmpty else {
-            return CalendarPullOutcome(updated: [], cleared: [])
+            return CalendarPullOutcome(updated: adopted, cleared: [])
         }
 
         let requests = items.compactMap { item -> (eventID: String, calendarID: String)? in
@@ -146,7 +148,7 @@ final class GoogleCalendarManager: ObservableObject {
         }
         print("[Calendar] Pulling changes for \(requests.count) linked event(s)")
 
-        var updated: [TodoItem] = []
+        var updated: [TodoItem] = adopted
         var cleared: [TodoItem] = []
         do {
             let token = try await authManager.validAccessToken()
@@ -198,6 +200,47 @@ final class GoogleCalendarManager: ObservableObject {
             errorMessage = error.localizedDescription
         }
         return CalendarPullOutcome(updated: updated, cleared: cleared)
+    }
+
+    /// Links tasks that have no block yet to events another app (Make It
+    /// So) created for them on the Blocks calendar, matched by the
+    /// event's googleTaskID property. Takes the event's time, since
+    /// Calendar always wins. Without this, scheduling the task in Blocks
+    /// would create a second, duplicate event. Looks at events ending in
+    /// the last 30 days or later. Returns the tasks it linked.
+    private func adoptEventsFromOtherApps(context: ModelContext) async -> [TodoItem] {
+        guard let blocksCalendarID else { return [] }
+        guard let localItems = try? context.fetch(FetchDescriptor<TodoItem>()) else { return [] }
+        let linkedEventIDs = Set(localItems.compactMap(\.calendarEventID))
+        var unscheduledByTaskID: [String: TodoItem] = [:]
+        for item in localItems where item.calendarEventID == nil {
+            if let googleTaskID = item.googleTaskID {
+                unscheduledByTaskID[googleTaskID] = item
+            }
+        }
+        guard !unscheduledByTaskID.isEmpty else { return [] }
+
+        do {
+            let token = try await authManager.validAccessToken()
+            let events = try await service.listEvents(calendarID: blocksCalendarID, timeMin: Date().addingTimeInterval(-30 * 24 * 60 * 60), accessToken: token)
+            var adopted: [TodoItem] = []
+            for event in events where !linkedEventIDs.contains(event.id) {
+                guard let googleTaskID = event.googleTaskID,
+                      let item = unscheduledByTaskID.removeValue(forKey: googleTaskID),
+                      let start = event.startDate, let end = event.endDate else { continue }
+                print("[Calendar] Adopting event \(event.id) for \"\(item.title)\" (created by another app)")
+                item.calendarEventID = event.id
+                item.calendarID = blocksCalendarID
+                item.dueDate = start
+                item.blockDurationSeconds = end.timeIntervalSince(start)
+                item.lastModified = Date()
+                adopted.append(item)
+            }
+            return adopted
+        } catch {
+            print("[Calendar] Failed to look for events from other apps: \(error.localizedDescription)")
+            return []
+        }
     }
 
     /// The calendar event title for a task: "✓ <title>" when complete,

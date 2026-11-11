@@ -16,6 +16,11 @@ struct GoogleCalendarEvent: Codable {
     var endDate: Date? { end?.dateTime.flatMap(GoogleCalendarService.parseDate) }
 }
 
+private struct EventListResponse: Decodable {
+    let items: [GoogleCalendarEvent]?
+    let nextPageToken: String?
+}
+
 struct EventDateTimeResponse: Codable {
     let dateTime: String?
     let date: String?
@@ -173,6 +178,38 @@ struct GoogleCalendarService: Sendable {
         let event = try JSONDecoder().decode(GoogleCalendarEvent.self, from: data)
         print("[Calendar] Updated event \(event.id), Google now reports summary: \"\(event.summary ?? "nil")\"")
         return event
+    }
+
+    /// Lists every (non-cancelled) event on a calendar that ends after
+    /// `timeMin`, following pagination.
+    func listEvents(calendarID: String, timeMin: Date, accessToken: String) async throws -> [GoogleCalendarEvent] {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        var events: [GoogleCalendarEvent] = []
+        var pageToken: String?
+        repeat {
+            var components = URLComponents(url: eventsURL(calendarID: calendarID), resolvingAgainstBaseURL: false)!
+            components.queryItems = [
+                URLQueryItem(name: "timeMin", value: formatter.string(from: timeMin)),
+                URLQueryItem(name: "singleEvents", value: "true"),
+                URLQueryItem(name: "maxResults", value: "2500"),
+            ]
+            if let pageToken {
+                components.queryItems?.append(URLQueryItem(name: "pageToken", value: pageToken))
+            }
+            var request = URLRequest(url: components.url!)
+            request.httpMethod = "GET"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+            print("[Calendar] GET \(components.url!.absoluteString)")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try Self.checkResponse(response, data: data, context: "list events")
+            let page = try JSONDecoder().decode(EventListResponse.self, from: data)
+            events += (page.items ?? []).filter { $0.status != "cancelled" }
+            pageToken = page.nextPageToken
+        } while pageToken != nil
+        print("[Calendar] Listed \(events.count) event(s) on calendar \(calendarID)")
+        return events
     }
 
     /// Adds/overwrites only the given private properties on an event,
